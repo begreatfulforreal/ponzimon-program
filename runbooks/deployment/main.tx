@@ -1,0 +1,15 @@
+################################################################
+# Manage bitsol deployment through Crypto Infrastructure as Code
+################################################################
+
+addon "svm" {
+    rpc_api_url = input.rpc_api_url
+    network_id = input.network_id
+}
+
+action "deploy_bitsol" "svm::deploy_program" {
+    description = "Deploy bitsol program"
+    program = svm::get_program_from_anchor_project("bitsol") 
+    authority = signer.authority
+    payer = signer.payer
+}

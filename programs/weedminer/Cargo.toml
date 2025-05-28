@@ -1,0 +1,22 @@
+[package]
+edition = "2021"
+name = "weedminer"
+version = "0.1.0"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "weedminer"
+
+[features]
+cpi = ["no-entrypoint"]
+default = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+
+[dependencies]
+anchor-lang = {version = "0.31.1", features = ["init-if-needed"]}
+anchor-spl = "0.31.1"
+spl-token = {version = "8.0.0", features = ["no-entrypoint"]}
+switchboard-on-demand = "0.3.8"
