@@ -32,18 +32,22 @@ import {
   signerIdentity,
 } from "@metaplex-foundation/umi";
 import { Weedminer } from "../target/types/weedminer";
-import { GLOBAL_STATE_SEED, GOVERNANCE_TOKEN_SEED } from "../tests/test-helpers";
+
 import fs from "fs";
 import { Command } from "commander";
 import { base58 } from "@metaplex-foundation/umi/serializers";
 
+const GLOBAL_STATE_SEED = "global_state";
+const GOVERNANCE_TOKEN_SEED = "governance_token";
 // Add metadata configuration
 const TOKEN_METADATA = {
-  name: "Weed",
-  symbol: "WEED",
-  uri: "https://litesol-gg.s3.us-west-2.amazonaws.com/litesol_token_meta.json",
-  external_url: "https://litesol.gg",
+  name: "Rand",
+  symbol: "RAND",
+  uri: "https://jade-brilliant-frog-932.mypinata.cloud/ipfs/bafkreigbbqqdqkga7cf7ylf67zc2mm6mua6ndvk7q4e2gpueevcwcfpgcq",
+  external_url: "https://whatever.gg",
 };
+
+const TOKEN_DECIMALS = 6;
 
 function serializeAccount(obj: any): any {
   if (obj instanceof anchor.BN || obj instanceof BN) {
@@ -123,7 +127,7 @@ async function mintToken(
       ...TOKEN_METADATA,
       mint,
       sellerFeeBasisPoints: percentAmount(0),
-      decimals: 6,
+      decimals: TOKEN_DECIMALS,
     });
     const createTokenIx = createTokenIfMissing(umi, {
       mint: mint.publicKey,
@@ -213,7 +217,7 @@ async function initializeProgram(
 
     console.log("Initializing program...");
     const HALVING_INTERVAL = new BN(halvingIntervalArg);
-    const TOTAL_SUPPLY = new BN(totalSupplyArg);
+    const TOTAL_SUPPLY = new BN(Number(totalSupplyArg) * 10 ** TOKEN_DECIMALS);
     const INITIAL_REWARD_RATE = new BN(initialRewardRateArg);
     const COOLDOWN_SLOTS = new BN(cooldownSlotsArg);
     const tx = await program.methods
@@ -360,7 +364,6 @@ async function updatePoolManual(
       .accountsStrict({
         authority: wallet.publicKey,
         globalState: globalStateKey,
-        clock: SYSVAR_CLOCK_PUBKEY,
       })
       .rpc();
 
@@ -497,7 +500,6 @@ async function resetPlayer(
         globalState: globalStateKey,
         player: playerKey,
         playerWallet: playerWallet,
-        clock: SYSVAR_CLOCK_PUBKEY,
       })
       .rpc();
 
@@ -621,7 +623,6 @@ async function generateGlobalRandomRewardCLI(
       .accountsStrict({
         authority: wallet.publicKey,
         globalState: globalStateKey,
-        clock: SYSVAR_CLOCK_PUBKEY,
       })
       .rpc();
 
@@ -647,7 +648,8 @@ program
   .requiredOption("-k, --keypair <path>", "Path to keypair file")
   .option(
     "-m, --mint-keypair <path>",
-    "Path to custom mint keypair file (optional)"
+    "Path to custom mint keypair file (optional)",
+    ""
   )
   .option(
     "-a, --amount <number>",

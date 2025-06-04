@@ -46,7 +46,7 @@ ts-node cli/program.ts <command> [options]
     -k <KEYPAIR.json> \
     -m <TOKEN_MINT_ADDRESS> \
     --halving-interval <number> \
-    --total-supply <number> \
+    --total-supply without decimals <number> \
     --initial-reward-rate <number> \
     --cooldown-slots <number> \
     -n <network-url>

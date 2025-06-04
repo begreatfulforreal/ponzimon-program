@@ -1124,7 +1124,6 @@ pub fn gamble(ctx: Context<Gamble>, amount: u64) -> Result<()> {
             win_amount,
         )?;
     } else {
-
         // Update global burned tokens counter
         gs.burned_tokens = gs.burned_tokens.saturating_add(amount);
         // Player loses - burn tokens and update burned_tokens counter
@@ -1139,7 +1138,6 @@ pub fn gamble(ctx: Context<Gamble>, amount: u64) -> Result<()> {
             ),
             amount,
         )?;
-
     }
 
     Ok(())
