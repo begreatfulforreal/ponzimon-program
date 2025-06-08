@@ -52,6 +52,12 @@ pub struct Player {
     pub last_claimed_global_reward_id: u64, // ID of the last global reward claimed by this player
     pub total_gambles: u64,                 // Total number of times player has gambled
     pub total_gamble_wins: u64,             // Total number of times player has won gambling
+
+    // Switchboard randomness fields
+    pub randomness_account: Pubkey, // Reference to the Switchboard randomness account
+    pub commit_slot: u64,           // The slot at which the randomness was committed
+    pub current_gamble_amount: u64, // Amount currently being gambled
+    pub has_pending_gamble: bool,   // Whether there's a pending gamble to settle
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]

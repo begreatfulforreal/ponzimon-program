@@ -103,8 +103,16 @@ pub mod weedminer {
         instructions::claim_global_random_reward(ctx)
     }
 
-    pub fn gamble(ctx: Context<Gamble>, amount: u64) -> Result<()> {
-        instructions::gamble(ctx, amount)
+    pub fn gamble_commit(
+        ctx: Context<GambleCommit>,
+        randomness_account: Pubkey,
+        amount: u64,
+    ) -> Result<()> {
+        instructions::gamble_commit(ctx, randomness_account, amount)
+    }
+
+    pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
+        instructions::gamble_settle(ctx)
     }
 }
 

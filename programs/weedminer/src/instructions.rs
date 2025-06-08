@@ -5,6 +5,7 @@ use anchor_spl::{
 };
 
 use crate::{constants::*, errors::WeedMinerError, helpers::*, state::*};
+use switchboard_on_demand::accounts::RandomnessAccountData;
 
 /// ────────────────────────────────────────────────────────────────────────────
 /// INTERNAL: update the global accumulator
@@ -270,7 +271,11 @@ pub struct PurchaseInitialFacility<'info> {
             + 8        // last_upgrade_slot
             + 8        // total_rewards
             + 8        // last_claimed_global_reward_id
-            + 8 + 8,   // total_gambles + total_gamble_wins
+            + 8 + 8    // total_gambles + total_gamble_wins
+            + 32       // randomness_account
+            + 8        // commit_slot
+            + 8        // current_gamble_amount
+            + 1,       // has_pending_gamble
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -373,6 +378,16 @@ pub fn purchase_initial_facility(
     player.last_acc_bits_per_hash = gs.acc_bits_per_hash;
     player.last_claimed_global_reward_id = 0;
 
+    // Initialize gambling fields
+    player.total_gambles = 0;
+    player.total_gamble_wins = 0;
+
+    // Initialize Switchboard randomness fields
+    player.randomness_account = Pubkey::default();
+    player.commit_slot = 0;
+    player.current_gamble_amount = 0;
+    player.has_pending_gamble = false;
+
     // global stats (Effect)
     gs.total_hashpower += 1_500;
 
@@ -383,7 +398,7 @@ pub fn purchase_initial_facility(
         facility_type: player.facility.facility_type,
         initial_machines: player.machines.len() as u8,
         initial_hashpower: player.hashpower,
-        slot: slot,
+        slot,
     });
 
     Ok(())
@@ -635,7 +650,7 @@ pub struct UpgradeFacility<'info> {
 
 pub fn upgrade_facility(ctx: Context<UpgradeFacility>, facility_type: u8) -> Result<()> {
     require!(
-        facility_type >= LOW_PROFILE_STORAGE && facility_type <= HIGH_RISE_APARTMENT,
+        (LOW_PROFILE_STORAGE..=HIGH_RISE_APARTMENT).contains(&facility_type),
         WeedMinerError::InvalidFacilityType
     );
 
@@ -1024,12 +1039,13 @@ pub fn reset_player(ctx: Context<ResetPlayer>) -> Result<()> {
 }
 
 #[derive(Accounts)]
-pub struct Gamble<'info> {
+pub struct GambleCommit<'info> {
     #[account(mut)]
     pub player_wallet: Signer<'info>,
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ WeedMinerError::Unauthorized,
+        constraint = !player.has_pending_gamble @ WeedMinerError::AlreadyHasPendingGamble,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -1046,26 +1062,26 @@ pub struct Gamble<'info> {
         constraint = player_token_account.mint == global_state.token_mint
     )]
     pub player_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: The account's data is validated manually within the handler.
+    pub randomness_account_data: AccountInfo<'info>,
     /// CHECK: This is the fees recipient wallet from global_state
     #[account(
         mut,
         constraint = fees_wallet.key() == global_state.fees_wallet @ WeedMinerError::Unauthorized
     )]
     pub fees_wallet: AccountInfo<'info>,
-    #[account(
-        mut,
-        constraint = fees_token_account.mint == global_state.token_mint,
-        constraint = fees_token_account.owner == global_state.fees_wallet @ WeedMinerError::Unauthorized
-    )]
-    pub fees_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
     pub token_mint: Account<'info, Mint>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 
-pub fn gamble(ctx: Context<Gamble>, amount: u64) -> Result<()> {
-    let slot = Clock::get()?.slot;
+pub fn gamble_commit(
+    ctx: Context<GambleCommit>,
+    randomness_account: Pubkey,
+    amount: u64,
+) -> Result<()> {
+    let clock = Clock::get()?;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
 
@@ -1078,7 +1094,23 @@ pub fn gamble(ctx: Context<Gamble>, amount: u64) -> Result<()> {
         WeedMinerError::InsufficientBits
     );
 
-    // Transfer 0.1 SOL fee to fees wallet
+    // Parse randomness data
+    let randomness_data =
+        RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
+
+    if randomness_data.seed_slot != clock.slot - 1 {
+        msg!("seed_slot: {}", randomness_data.seed_slot);
+        msg!("slot: {}", clock.slot);
+        return Err(WeedMinerError::RandomnessAlreadyRevealed.into());
+    }
+
+    // Track the player's committed values
+    player.commit_slot = randomness_data.seed_slot;
+    player.randomness_account = randomness_account;
+    player.current_gamble_amount = amount;
+    player.has_pending_gamble = true;
+
+    // Optional SOL fee (0.01 SOL)
     anchor_lang::system_program::transfer(
         CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
@@ -1087,17 +1119,96 @@ pub fn gamble(ctx: Context<Gamble>, amount: u64) -> Result<()> {
                 to: ctx.accounts.fees_wallet.to_account_info(),
             },
         ),
-        100_000_000,
+        100_000_000, // 0.1 SOL
+    )?;
+
+    // Burn the gambling tokens immediately
+    gs.burned_tokens = gs.burned_tokens.saturating_add(amount);
+    token::burn(
+        CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Burn {
+                mint: ctx.accounts.token_mint.to_account_info(),
+                from: ctx.accounts.player_token_account.to_account_info(),
+                authority: ctx.accounts.player_wallet.to_account_info(),
+            },
+        ),
+        amount,
     )?;
 
     // Increment total gambles counters
     player.total_gambles = player.total_gambles.saturating_add(1);
     gs.total_global_gambles = gs.total_global_gambles.saturating_add(1);
 
-    let last_digit = slot % 10;
+    msg!(
+        "Gamble committed, randomness requested for amount: {}",
+        amount
+    );
+    Ok(())
+}
 
-    if last_digit == 1 {
-        let win_amount = amount * 9;
+#[derive(Accounts)]
+pub struct GambleSettle<'info> {
+    #[account(mut)]
+    pub player_wallet: Signer<'info>,
+    #[account(
+        mut,
+        constraint = player.owner == player_wallet.key() @ WeedMinerError::Unauthorized,
+        constraint = player.has_pending_gamble @ WeedMinerError::NoPendingGamble,
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        bump
+    )]
+    pub player: Account<'info, Player>,
+    #[account(
+        mut,
+        seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        constraint = player_token_account.owner == player_wallet.key(),
+        constraint = player_token_account.mint == global_state.token_mint
+    )]
+    pub player_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: The account's data is validated manually within the handler.
+    pub randomness_account_data: AccountInfo<'info>,
+    #[account(mut)]
+    pub token_mint: Account<'info, Mint>,
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
+    let clock: Clock = Clock::get()?;
+    let player = &mut ctx.accounts.player;
+    let gs = &mut ctx.accounts.global_state;
+
+    // Verify that the provided randomness account matches the stored one
+    if ctx.accounts.randomness_account_data.key() != player.randomness_account {
+        return Err(WeedMinerError::InvalidRandomnessAccount.into());
+    }
+
+    // Parse randomness data
+    let randomness_data =
+        RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
+
+    if randomness_data.seed_slot != player.commit_slot {
+        return Err(WeedMinerError::RandomnessExpired.into());
+    }
+
+    // Get the revealed random value
+    let revealed_random_value = randomness_data
+        .get_value(&clock)
+        .map_err(|_| WeedMinerError::RandomnessNotResolved)?;
+
+    // Use revealed random value for slot machine odds (2.5% chance for 10x = ~75% house edge)
+    let randomness_result = revealed_random_value[0] % 100 < 3; // ~3% chance to win
+
+    if randomness_result {
+        msg!("GAMBLE_RESULT: WIN!");
+
+        // Player wins 10x their original amount
+        let win_amount = player.current_gamble_amount * 10;
 
         player.total_gamble_wins = player.total_gamble_wins.saturating_add(1);
         gs.total_global_gamble_wins = gs.total_global_gamble_wins.saturating_add(1);
@@ -1124,21 +1235,14 @@ pub fn gamble(ctx: Context<Gamble>, amount: u64) -> Result<()> {
             win_amount,
         )?;
     } else {
-        // Update global burned tokens counter
-        gs.burned_tokens = gs.burned_tokens.saturating_add(amount);
-        // Player loses - burn tokens and update burned_tokens counter
-        token::burn(
-            CpiContext::new(
-                ctx.accounts.token_program.to_account_info(),
-                Burn {
-                    mint: ctx.accounts.token_mint.to_account_info(),
-                    from: ctx.accounts.player_token_account.to_account_info(),
-                    authority: ctx.accounts.player_wallet.to_account_info(),
-                },
-            ),
-            amount,
-        )?;
+        msg!("GAMBLE_RESULT: LOSE!");
     }
+
+    // Reset gambling state
+    player.has_pending_gamble = false;
+    player.current_gamble_amount = 0;
+    player.randomness_account = Pubkey::default();
+    player.commit_slot = 0;
 
     Ok(())
 }

@@ -50,4 +50,18 @@ pub enum WeedMinerError {
     InvalidDustThresholdDivisor,
     #[msg("Current facility is not at maximum machine capacity for upgrade")]
     FacilityNotFull,
+
+    // Switchboard randomness errors
+    #[msg("Randomness already revealed")]
+    RandomnessAlreadyRevealed,
+    #[msg("Randomness not resolved")]
+    RandomnessNotResolved,
+    #[msg("Randomness expired")]
+    RandomnessExpired,
+    #[msg("Invalid randomness account")]
+    InvalidRandomnessAccount,
+    #[msg("No pending gamble to settle")]
+    NoPendingGamble,
+    #[msg("Player already has a pending gamble")]
+    AlreadyHasPendingGamble,
 }
