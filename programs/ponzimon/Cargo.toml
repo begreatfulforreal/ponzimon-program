@@ -1,11 +1,11 @@
 [package]
 edition = "2021"
-name = "weedminer"
+name = "ponzimon"
 version = "0.1.0"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "weedminer"
+name = "ponzimon"
 
 [features]
 cpi = ["no-entrypoint"]

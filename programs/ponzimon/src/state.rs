@@ -23,15 +23,11 @@ pub struct GlobalState {
     pub burn_rate: u8,               // % of BITS cost burned (default 75)
     pub referral_fee: u8,            // ‰ (per-mille) paid to referrer (default 25 => 2.5 %)
     pub production_enabled: bool,    // Global kill-switch
-    pub cooldown_slots: u64,         // Facility upgrade cooldown
+    pub cooldown_slots: u64,         // Farm upgrade cooldown
     pub dust_threshold_divisor: u64, // Divisor for total_supply to get dust_threshold (default 1000 for 0.1%)
 
     /* ── gameplay stats ─────────────────────────── */
-    pub total_hashpower: u64, // Σ player hash-rate
-
-    /* ── global random rewards ─────────────────── */
-    pub global_random_reward: Option<GlobalRandomReward>,
-    pub global_reward_counter: u64, // Increments each time admin creates a new reward
+    pub total_berries: u64, // Σ player berry consumption
 
     /* ── gambling stats ───────────────────────── */
     pub total_global_gambles: u64, // Total number of gambles across all players
@@ -41,17 +37,16 @@ pub struct GlobalState {
 #[account]
 pub struct Player {
     pub owner: Pubkey,
-    pub facility: Facility,
-    pub machines: Vec<Machine>,
-    pub hashpower: u64,
+    pub farm: Farm,
+    pub cards: Vec<Card>,
+    pub berries: u64, // Total berry consumption by all cards
     pub referrer: Option<Pubkey>,
     pub last_acc_bits_per_hash: u128,
     pub last_claim_slot: u64,
     pub last_upgrade_slot: u64,
     pub total_rewards: u64,
-    pub last_claimed_global_reward_id: u64, // ID of the last global reward claimed by this player
-    pub total_gambles: u64,                 // Total number of times player has gambled
-    pub total_gamble_wins: u64,             // Total number of times player has won gambling
+    pub total_gambles: u64,     // Total number of times player has gambled
+    pub total_gamble_wins: u64, // Total number of times player has won gambling
 
     // Switchboard randomness fields
     pub randomness_account: Pubkey, // Reference to the Switchboard randomness account
@@ -61,30 +56,22 @@ pub struct Player {
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
-pub struct Facility {
-    pub facility_type: u8,
-    pub total_machines: u8,
-    pub power_output: u64,
+pub struct Farm {
+    pub farm_type: u8,
+    pub total_cards: u8,     // Max number of cards this farm can hold
+    pub berry_capacity: u64, // Total berry capacity of this farm
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
-pub struct Machine {
-    pub machine_type: u8,
-    pub hashrate: u64,
-    pub power_consumption: u64,
+pub struct Card {
+    pub card_type: u8,          // Type of Pokemon card
+    pub card_power: u64,        // Power level of the card for rewards
+    pub berry_consumption: u64, // How many berries this card consumes per slot
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
-pub struct HashpowerCheckpoint {
+pub struct CardPowerCheckpoint {
     pub slot: u64,
-    pub hashpower: u64,
+    pub card_power: u64, // Total card power at this checkpoint
     pub accumulated_rewards: u64,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
-pub struct GlobalRandomReward {
-    pub reward_id: u64, // Unique ID for this reward (from global_reward_counter)
-    pub amount: u64,
-    pub generated_slot: u64,
-    pub expiry_slot: u64,
 }

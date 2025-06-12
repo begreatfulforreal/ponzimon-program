@@ -4,14 +4,14 @@ use anchor_spl::{
     token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer},
 };
 
-use crate::{constants::*, errors::WeedMinerError, helpers::*, state::*};
+use crate::{constants::*, errors::PonzimonError, helpers::*, state::*};
 use switchboard_on_demand::accounts::RandomnessAccountData;
 
 /// ────────────────────────────────────────────────────────────────────────────
 /// INTERNAL: update the global accumulator
 /// ────────────────────────────────────────────────────────────────────────────
 fn update_pool(gs: &mut GlobalState, slot_now: u64) {
-    if slot_now <= gs.last_reward_slot || gs.total_hashpower == 0 {
+    if slot_now <= gs.last_reward_slot || gs.total_berries == 0 {
         gs.last_reward_slot = slot_now;
         return;
     }
@@ -47,7 +47,7 @@ fn update_pool(gs: &mut GlobalState, slot_now: u64) {
         .unwrap_or(u128::MAX);
     reward = reward.min(remaining_supply as u128); // clamp to cap
 
-    gs.acc_bits_per_hash += reward * ACC_SCALE / gs.total_hashpower as u128;
+    gs.acc_bits_per_hash += reward * ACC_SCALE / gs.total_berries as u128;
     gs.cumulative_rewards = gs.cumulative_rewards.saturating_add(reward as u64);
 
     gs.current_reward_rate = if remaining_supply > 0 { rate_now } else { 0 };
@@ -74,11 +74,11 @@ fn settle_and_mint_rewards<'info>(
 
     require!(
         now > player.last_claim_slot,
-        WeedMinerError::CooldownNotExpired
+        PonzimonError::CooldownNotExpired
     );
 
     // calculate pending
-    let pending_u128 = (player.hashpower as u128)
+    let pending_u128 = (player.berries as u128)
         .checked_mul(
             gs.acc_bits_per_hash
                 .saturating_sub(player.last_acc_bits_per_hash),
@@ -184,9 +184,7 @@ pub struct InitializeProgram<'info> {
         + 8  + 8  + 8           /* halving_interval + last_halvings + initial_rate */
         + 8  + 16 + 8           /* current_rate + acc_bits_per_hash (u128!) + last_reward_slot */
         + 1  + 1 + 1 + 8 + 8    /* burn_rate + referral_fee + prod + cooldown + dust_divisor */
-        + 8                     /* total_hashpower */
-        + 33                    /* global_random_reward: Option<GlobalRandomReward> (1 + 8 + 8 + 8 + 8) */
-        + 8                     /* global_reward_counter */
+        + 8                     /* total_berries */
         + 8 + 8,                /* total_global_gambles + total_global_gamble_wins */
         seeds=[GLOBAL_STATE_SEED, token_mint.key().as_ref()],
         bump
@@ -241,19 +239,17 @@ pub fn initialize_program(
     gs.cooldown_slots = cooldown_slots.unwrap_or(108_000); // 12 hours
     gs.dust_threshold_divisor = 1000; // Default to 0.1%
 
-    gs.total_hashpower = 0;
-    gs.global_random_reward = None;
-    gs.global_reward_counter = 0;
+    gs.total_berries = 0;
 
     Ok(())
 }
 
 /// ────────────────────────────────────────────────────────────────────────────
-///  PURCHASE INITIAL FACILITY
+///  PURCHASE INITIAL FARM
 /// ────────────────────────────────────────────────────────────────────────────
 #[derive(Accounts)]
 #[instruction(referrer: Option<Pubkey>)]
-pub struct PurchaseInitialFacility<'info> {
+pub struct PurchaseInitialFarm<'info> {
     #[account(mut)]
     pub player_wallet: Signer<'info>,
     #[account(
@@ -261,16 +257,15 @@ pub struct PurchaseInitialFacility<'info> {
         payer = player_wallet,
         space = 8      // discriminator
             + 32       // owner
-            + 10       // facility
-            + 4        // machines vec header
-            + (12 * 17)// MAX_MINERS (12) * size_of(Machine)
-            + 8        // hashpower
+            + 10       // farm
+            + 4        // cards vec header
+            + (50 * 17)// MAX_CARDS (50) * size_of(Card)
+            + 8        // berries
             + 33       // referrer
             + 16       // last_acc_bits_per_hash
             + 8        // last_claim_slot
             + 8        // last_upgrade_slot
             + 8        // total_rewards
-            + 8        // last_claimed_global_reward_id
             + 8 + 8    // total_gambles + total_gamble_wins
             + 32       // randomness_account
             + 8        // commit_slot
@@ -289,12 +284,12 @@ pub struct PurchaseInitialFacility<'info> {
     /// CHECK: This is the fees recipient wallet from global_state
     #[account(
         mut,
-        constraint = fees_wallet.key() == global_state.fees_wallet @ WeedMinerError::Unauthorized
+        constraint = fees_wallet.key() == global_state.fees_wallet @ PonzimonError::Unauthorized
     )]
     pub fees_wallet: AccountInfo<'info>,
     #[account(
         mut,
-        constraint = token_mint.key() == global_state.token_mint @ WeedMinerError::InvalidTokenMint
+        constraint = token_mint.key() == global_state.token_mint @ PonzimonError::InvalidTokenMint
     )]
     pub token_mint: Account<'info, Mint>,
     #[account(
@@ -311,35 +306,35 @@ pub struct PurchaseInitialFacility<'info> {
 }
 
 #[event]
-pub struct InitialFacilityPurchased {
+pub struct InitialFarmPurchased {
     pub player_wallet: Pubkey,
     pub player_account: Pubkey,
     pub referrer: Option<Pubkey>,
-    pub facility_type: u8,
-    pub initial_machines: u8,
+    pub farm_type: u8,
+    pub initial_cards: u8,
     pub initial_hashpower: u64,
     pub slot: u64,
 }
 
-pub fn purchase_initial_facility(
-    ctx: Context<PurchaseInitialFacility>,
+pub fn purchase_initial_farm(
+    ctx: Context<PurchaseInitialFarm>,
     referrer: Option<Pubkey>,
 ) -> Result<()> {
     let slot = Clock::get()?.slot;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
 
-    require!(gs.production_enabled, WeedMinerError::ProductionDisabled);
+    require!(gs.production_enabled, PonzimonError::ProductionDisabled);
     require!(
-        player.machines.is_empty(),
-        WeedMinerError::InitialFacilityAlreadyPurchased
+        player.cards.is_empty(),
+        PonzimonError::InitialFarmAlreadyPurchased
     );
 
     // Prevent self-referral
     if let Some(ref r) = referrer {
         require!(
             *r != ctx.accounts.player_wallet.key(),
-            WeedMinerError::SelfReferralNotAllowed
+            PonzimonError::SelfReferralNotAllowed
         );
     }
 
@@ -360,23 +355,42 @@ pub fn purchase_initial_facility(
 
     // player bootstrap
     player.owner = ctx.accounts.player_wallet.key();
-    player.facility = Facility {
-        facility_type: 0,  // Starter Shack
-        total_machines: 2, // From facilities.json
-        power_output: 15,  // From facilities.json
+    player.farm = Farm {
+        farm_type: 0,       // Starter Hut
+        total_cards: 3,     // Can hold 3 cards initially
+        berry_capacity: 15, // 15 berry capacity
     };
-    player.machines = vec![Machine {
-        machine_type: 0,      // Nano Rig
-        hashrate: 1_500,      // From machines.json
-        power_consumption: 3, // From machines.json
-    }];
-    player.hashpower = 1_500; // Match the initial miner's hashrate
+
+    // Give player 3 starter cards
+    let starter_cards = vec![
+        Card {
+            card_type: COMMON_CARD,
+            card_power: 100,
+            berry_consumption: 3,
+        },
+        Card {
+            card_type: COMMON_CARD,
+            card_power: 100,
+            berry_consumption: 3,
+        },
+        Card {
+            card_type: UNCOMMON_CARD,
+            card_power: 250,
+            berry_consumption: 5,
+        },
+    ];
+
+    let total_berry_consumption = starter_cards
+        .iter()
+        .map(|c| c.berry_consumption)
+        .sum::<u64>();
+    player.cards = starter_cards;
+    player.berries = total_berry_consumption; // Total berry consumption
     player.referrer = referrer;
     player.last_claim_slot = slot;
     player.last_upgrade_slot = slot;
     player.total_rewards = 0;
     player.last_acc_bits_per_hash = gs.acc_bits_per_hash;
-    player.last_claimed_global_reward_id = 0;
 
     // Initialize gambling fields
     player.total_gambles = 0;
@@ -389,15 +403,15 @@ pub fn purchase_initial_facility(
     player.has_pending_gamble = false;
 
     // global stats (Effect)
-    gs.total_hashpower += 1_500;
+    gs.total_berries += total_berry_consumption;
 
-    emit!(InitialFacilityPurchased {
+    emit!(InitialFarmPurchased {
         player_wallet: ctx.accounts.player_wallet.key(),
         player_account: player.key(),
         referrer,
-        facility_type: player.facility.facility_type,
-        initial_machines: player.machines.len() as u8,
-        initial_hashpower: player.hashpower,
+        farm_type: player.farm.farm_type,
+        initial_cards: player.cards.len() as u8,
+        initial_hashpower: player.berries,
         slot,
     });
 
@@ -405,16 +419,15 @@ pub fn purchase_initial_facility(
 }
 
 /// ────────────────────────────────────────────────────────────────────────────
-///  BUY MINER
+///  OPEN BOOSTER PACK
 /// ────────────────────────────────────────────────────────────────────────────
 #[derive(Accounts)]
-#[instruction(machine_type: u8)]
-pub struct BuyMachine<'info> {
+pub struct OpenBooster<'info> {
     #[account(mut)]
     pub player_wallet: Signer<'info>,
     #[account(
         mut,
-        constraint = player.owner == player_wallet.key() @ WeedMinerError::Unauthorized,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -433,7 +446,7 @@ pub struct BuyMachine<'info> {
     #[account(
         mut,
         constraint = fees_token_account.mint == global_state.token_mint,
-        constraint = fees_token_account.owner == global_state.fees_wallet @ WeedMinerError::Unauthorized
+        constraint = fees_token_account.owner == global_state.fees_wallet @ PonzimonError::Unauthorized
     )]
     pub fees_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
@@ -442,22 +455,26 @@ pub struct BuyMachine<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn buy_machine(ctx: Context<BuyMachine>, machine_type: u8) -> Result<()> {
-    require!(
-        machine_type < MACHINE_CONFIGS.len() as u8,
-        WeedMinerError::InvalidMachineType
-    );
-
+pub fn open_booster(ctx: Context<OpenBooster>) -> Result<()> {
     let slot = Clock::get()?.slot;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
 
     // guards
-    require!(gs.production_enabled, WeedMinerError::ProductionDisabled);
+    require!(gs.production_enabled, PonzimonError::ProductionDisabled);
 
+    // Check if player has space for 5 more cards
     require!(
-        player.machines.len() < player.facility.total_machines as usize,
-        WeedMinerError::MachineCapacityExceeded
+        player.cards.len() + 5 <= player.farm.total_cards as usize,
+        PonzimonError::MachineCapacityExceeded
+    );
+
+    // Check if farm has enough berry capacity for new cards
+    // Estimate berry consumption for 5 new cards (using average of 8 berries per card)
+    let estimated_new_berry_consumption = 5 * 8; // Conservative estimate
+    require!(
+        player.berries + estimated_new_berry_consumption <= player.farm.berry_capacity,
+        PonzimonError::PowerCapacityExceeded
     );
 
     settle_and_mint_rewards(
@@ -472,39 +489,58 @@ pub fn buy_machine(ctx: Context<BuyMachine>, machine_type: u8) -> Result<()> {
         ctx.bumps.global_state,
     )?;
 
-    // configs
-    let (hashrate, power_consumption, cost) = MACHINE_CONFIGS[machine_type as usize];
-    let total_power = player
-        .machines
-        .iter()
-        .map(|m| m.power_consumption)
-        .sum::<u64>()
-        + power_consumption;
+    // Booster pack cost: 100 BITS
+    let booster_cost = 100_000_000; // 100 BITS in microBITS
     require!(
-        total_power <= player.facility.power_output,
-        WeedMinerError::PowerCapacityExceeded
-    );
-    require!(
-        ctx.accounts.player_token_account.amount >= cost,
-        WeedMinerError::InsufficientBits
+        ctx.accounts.player_token_account.amount >= booster_cost,
+        PonzimonError::InsufficientBits
     );
 
     // Calculate amounts for burn/transfer
-    let burn_amount = cost * gs.burn_rate as u64 / 100;
-    let fees_amount = cost - burn_amount;
+    let burn_amount = booster_cost * gs.burn_rate as u64 / 100;
+    let fees_amount = booster_cost - burn_amount;
 
     // === EFFECTS ===
     // Update global state for burned tokens
     gs.burned_tokens = gs.burned_tokens.saturating_add(burn_amount);
 
-    // Add new miner and update player & global hashpower
-    player.machines.push(Machine {
-        machine_type,
-        hashrate,
-        power_consumption,
-    });
-    player.hashpower += hashrate;
-    gs.total_hashpower += hashrate;
+    // Generate 5 random cards using timestamp-based randomness
+    let timestamp = Clock::get()?.unix_timestamp;
+    let mut total_new_berry_consumption = 0u64;
+
+    for i in 0..5 {
+        // Simple pseudo-random number generation using timestamp + card index
+        let seed = (timestamp as u64)
+            .wrapping_add(i as u64)
+            .wrapping_add(player.cards.len() as u64);
+        let random_value = seed.wrapping_mul(1103515245).wrapping_add(12345) % 100;
+
+        // Determine card rarity based on probability
+        let card_type = match random_value {
+            0..=49 => COMMON_CARD,      // 50% chance
+            50..=74 => UNCOMMON_CARD,   // 25% chance
+            75..=89 => RARE_CARD,       // 15% chance
+            90..=95 => HOLO_RARE_CARD,  // 6% chance
+            96..=98 => ULTRA_RARE_CARD, // 3% chance
+            99 => SECRET_RARE_CARD,     // 1% chance
+            _ => COMMON_CARD,
+        };
+
+        let (card_power, berry_consumption, _) = CARD_CONFIGS[card_type as usize];
+
+        let new_card = Card {
+            card_type,
+            card_power,
+            berry_consumption,
+        };
+
+        total_new_berry_consumption += berry_consumption;
+        player.cards.push(new_card);
+    }
+
+    // Update player and global berry consumption
+    player.berries += total_new_berry_consumption;
+    gs.total_berries += total_new_berry_consumption;
 
     // Update player's accumulator state
     player.last_acc_bits_per_hash = gs.acc_bits_per_hash;
@@ -539,16 +575,16 @@ pub fn buy_machine(ctx: Context<BuyMachine>, machine_type: u8) -> Result<()> {
 }
 
 /// ────────────────────────────────────────────────────────────────────────────
-///  SELL MINER
+///  SELL CARD
 /// ────────────────────────────────────────────────────────────────────────────
 #[derive(Accounts)]
-#[instruction(machine_index: u8)]
-pub struct SellMachine<'info> {
+#[instruction(card_index: u8)]
+pub struct SellCard<'info> {
     #[account(mut)]
     pub player_wallet: Signer<'info>,
     #[account(
         mut,
-        constraint = player.owner == player_wallet.key() @ WeedMinerError::Unauthorized,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -567,7 +603,7 @@ pub struct SellMachine<'info> {
     #[account(
         mut,
         constraint = fees_token_account.mint == global_state.token_mint,
-        constraint = fees_token_account.owner == global_state.fees_wallet @ WeedMinerError::Unauthorized
+        constraint = fees_token_account.owner == global_state.fees_wallet @ PonzimonError::Unauthorized
     )]
     pub fees_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
@@ -575,16 +611,16 @@ pub struct SellMachine<'info> {
     pub token_program: Program<'info, Token>,
 }
 
-pub fn sell_machine(ctx: Context<SellMachine>, machine_index: u8) -> Result<()> {
+pub fn sell_card(ctx: Context<SellCard>, card_index: u8) -> Result<()> {
     let slot = Clock::get()?.slot;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
 
-    require!(gs.production_enabled, WeedMinerError::ProductionDisabled);
+    require!(gs.production_enabled, PonzimonError::ProductionDisabled);
 
     require!(
-        machine_index < player.machines.len() as u8,
-        WeedMinerError::InvalidMachineType
+        card_index < player.cards.len() as u8,
+        PonzimonError::InvalidMachineType
     );
 
     settle_and_mint_rewards(
@@ -599,10 +635,10 @@ pub fn sell_machine(ctx: Context<SellMachine>, machine_index: u8) -> Result<()> 
         ctx.bumps.global_state,
     )?;
 
-    let miner = player.machines.remove(machine_index as usize);
+    let card = player.cards.remove(card_index as usize);
 
-    player.hashpower = player.hashpower.saturating_sub(miner.hashrate);
-    gs.total_hashpower = gs.total_hashpower.saturating_sub(miner.hashrate);
+    player.berries = player.berries.saturating_sub(card.berry_consumption);
+    gs.total_berries = gs.total_berries.saturating_sub(card.berry_consumption);
 
     player.last_acc_bits_per_hash = gs.acc_bits_per_hash;
 
@@ -610,18 +646,18 @@ pub fn sell_machine(ctx: Context<SellMachine>, machine_index: u8) -> Result<()> 
 }
 
 /// ────────────────────────────────────────────────────────────────────────────
-///  UPGRADE FACILITY  (hp does not change → only update pool/debt if you add hp)
+///  UPGRADE FARM  (hp does not change → only update pool/debt if you add hp)
 /// ────────────────────────────────────────────────────────────────────────────
 #[derive(Accounts)]
-#[instruction(facility_type: u8)]
-pub struct UpgradeFacility<'info> {
+#[instruction(farm_type: u8)]
+pub struct UpgradeFarm<'info> {
     #[account(mut)]
     pub player_wallet: Signer<'info>,
     #[account(
         mut,
-        constraint = player.owner == player_wallet.key() @ WeedMinerError::Unauthorized,
-        constraint = facility_type > player.facility.facility_type @ WeedMinerError::InvalidFacilityType,
-        constraint = facility_type <= HIGH_RISE_APARTMENT @ WeedMinerError::InvalidFacilityType,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
+        constraint = farm_type > player.farm.farm_type @ PonzimonError::InvalidFarmType,
+        constraint = farm_type <= MASTER_ARENA @ PonzimonError::InvalidFarmType,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -640,7 +676,7 @@ pub struct UpgradeFacility<'info> {
     #[account(
         mut,
         constraint = fees_token_account.mint == global_state.token_mint,
-        constraint = fees_token_account.owner == global_state.fees_wallet @ WeedMinerError::Unauthorized
+        constraint = fees_token_account.owner == global_state.fees_wallet @ PonzimonError::Unauthorized
     )]
     pub fees_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
@@ -648,10 +684,10 @@ pub struct UpgradeFacility<'info> {
     pub token_program: Program<'info, Token>,
 }
 
-pub fn upgrade_facility(ctx: Context<UpgradeFacility>, facility_type: u8) -> Result<()> {
+pub fn upgrade_farm(ctx: Context<UpgradeFarm>, farm_type: u8) -> Result<()> {
     require!(
-        (LOW_PROFILE_STORAGE..=HIGH_RISE_APARTMENT).contains(&facility_type),
-        WeedMinerError::InvalidFacilityType
+        (COZY_CABIN..=MASTER_ARENA).contains(&farm_type),
+        PonzimonError::InvalidFarmType
     );
 
     let slot = Clock::get()?.slot;
@@ -660,10 +696,10 @@ pub fn upgrade_facility(ctx: Context<UpgradeFacility>, facility_type: u8) -> Res
 
     update_pool(gs, slot);
 
-    require!(gs.production_enabled, WeedMinerError::ProductionDisabled);
+    require!(gs.production_enabled, PonzimonError::ProductionDisabled);
     require!(
         slot >= player.last_upgrade_slot + gs.cooldown_slots,
-        WeedMinerError::CooldownNotExpired
+        PonzimonError::CooldownNotExpired
     );
 
     settle_and_mint_rewards(
@@ -678,21 +714,21 @@ pub fn upgrade_facility(ctx: Context<UpgradeFacility>, facility_type: u8) -> Res
         ctx.bumps.global_state,
     )?;
 
-    let (total_machines, power_output, cost) = FACILITY_CONFIGS[facility_type as usize];
+    let (total_cards, berry_capacity, cost) = FARM_CONFIGS[farm_type as usize];
 
     require!(
         ctx.accounts.player_token_account.amount >= cost,
-        WeedMinerError::InsufficientBits
+        PonzimonError::InsufficientBits
     );
 
     let burn_amount = cost * gs.burn_rate as u64 / 100;
     let fees_amount = cost - burn_amount;
 
     // === EFFECTS ===
-    // Update player facility and state
-    player.facility.facility_type = facility_type;
-    player.facility.total_machines = total_machines;
-    player.facility.power_output = power_output;
+    // Update player farm and state
+    player.farm.farm_type = farm_type;
+    player.farm.total_cards = total_cards;
+    player.farm.berry_capacity = berry_capacity;
     player.last_upgrade_slot = slot;
     player.last_acc_bits_per_hash = gs.acc_bits_per_hash;
 
@@ -736,7 +772,7 @@ pub struct ClaimRewards<'info> {
     pub player_wallet: Signer<'info>,
     #[account(
         mut,
-        constraint = player.owner == player_wallet.key() @ WeedMinerError::Unauthorized,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -755,14 +791,14 @@ pub struct ClaimRewards<'info> {
     pub player_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        constraint = player.referrer.is_some() && referrer_token_account.owner == player.referrer.unwrap() @ WeedMinerError::InvalidReferrer,
-        constraint = referrer_token_account.mint == global_state.token_mint @ WeedMinerError::InvalidTokenMint
+        constraint = player.referrer.is_some() && referrer_token_account.owner == player.referrer.unwrap() @ PonzimonError::InvalidReferrer,
+        constraint = referrer_token_account.mint == global_state.token_mint @ PonzimonError::InvalidTokenMint
     )]
     pub referrer_token_account: Option<Box<Account<'info, TokenAccount>>>,
     #[account(
         mut,
         constraint = fees_token_account.mint == global_state.token_mint,
-        constraint = fees_token_account.owner == global_state.fees_wallet @ WeedMinerError::Unauthorized
+        constraint = fees_token_account.owner == global_state.fees_wallet @ PonzimonError::Unauthorized
     )]
     pub fees_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
@@ -798,7 +834,7 @@ pub struct ToggleProduction<'info> {
     pub authority: Signer<'info>,
     #[account(
         mut,
-        has_one = authority @ WeedMinerError::Unauthorized
+        has_one = authority @ PonzimonError::Unauthorized
     )]
     pub global_state: Account<'info, GlobalState>,
 }
@@ -815,7 +851,7 @@ pub struct UpdateParameters<'info> {
     pub authority: Signer<'info>,
     #[account(
         mut,
-        has_one = authority @ WeedMinerError::Unauthorized
+        has_one = authority @ PonzimonError::Unauthorized
     )]
     pub global_state: Account<'info, GlobalState>,
 }
@@ -831,27 +867,27 @@ pub fn update_parameters(
     let global_state = &mut ctx.accounts.global_state;
 
     if let Some(fee) = referral_fee {
-        require!(fee <= 50, WeedMinerError::InvalidReferralFee); // Max 5.0%
+        require!(fee <= 50, PonzimonError::InvalidReferralFee); // Max 5.0%
         global_state.referral_fee = fee;
     }
 
     if let Some(rate) = burn_rate {
-        require!(rate <= 100, WeedMinerError::InvalidBurnRate); // Max 100%
+        require!(rate <= 100, PonzimonError::InvalidBurnRate); // Max 100%
         global_state.burn_rate = rate;
     }
 
     if let Some(slots) = cooldown_slots {
-        require!(slots > 0, WeedMinerError::InvalidCooldownSlots);
+        require!(slots > 0, PonzimonError::InvalidCooldownSlots);
         global_state.cooldown_slots = slots;
     }
 
     if let Some(halving) = halving_interval {
-        require!(halving > 0, WeedMinerError::InvalidHalvingInterval);
+        require!(halving > 0, PonzimonError::InvalidHalvingInterval);
         global_state.halving_interval = halving;
     }
 
     if let Some(divisor) = dust_threshold_divisor {
-        require!(divisor > 0, WeedMinerError::InvalidDustThresholdDivisor);
+        require!(divisor > 0, PonzimonError::InvalidDustThresholdDivisor);
         global_state.dust_threshold_divisor = divisor;
     }
 
@@ -864,7 +900,7 @@ pub struct UpdatePool<'info> {
     pub authority: Signer<'info>,
     #[account(
         mut,
-        has_one = authority @ WeedMinerError::Unauthorized
+        has_one = authority @ PonzimonError::Unauthorized
     )]
     pub global_state: Account<'info, GlobalState>,
 }
@@ -879,123 +915,12 @@ pub fn update_pool_manual(ctx: Context<UpdatePool>) -> Result<()> {
 }
 
 #[derive(Accounts)]
-pub struct GenerateGlobalRandomReward<'info> {
-    #[account(mut)]
-    pub authority: Signer<'info>,
-    #[account(
-        mut,
-        has_one = authority @ WeedMinerError::Unauthorized
-    )]
-    pub global_state: Account<'info, GlobalState>,
-}
-
-pub fn generate_global_random_reward(
-    ctx: Context<GenerateGlobalRandomReward>,
-    amount: u64,
-    expiry_slots: u64,
-) -> Result<()> {
-    let slot = Clock::get()?.slot;
-    let gs = &mut ctx.accounts.global_state;
-
-    // Increment the global reward counter
-    gs.global_reward_counter = gs.global_reward_counter.saturating_add(1);
-
-    gs.global_random_reward = Some(GlobalRandomReward {
-        reward_id: gs.global_reward_counter,
-        amount,
-        generated_slot: slot,
-        expiry_slot: slot + expiry_slots,
-    });
-
-    Ok(())
-}
-
-#[derive(Accounts)]
-pub struct ClaimGlobalRandomReward<'info> {
-    #[account(mut)]
-    pub player_wallet: Signer<'info>,
-    #[account(
-        mut,
-        constraint = player.owner == player_wallet.key() @ WeedMinerError::Unauthorized,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
-        bump
-    )]
-    pub player: Account<'info, Player>,
-    #[account(
-        mut,
-        seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
-        bump,
-    )]
-    pub global_state: Account<'info, GlobalState>,
-    #[account(
-        mut,
-        constraint = player_token_account.owner == player_wallet.key(),
-        constraint = player_token_account.mint == global_state.token_mint
-    )]
-    pub player_token_account: Box<Account<'info, TokenAccount>>,
-    #[account(mut)]
-    pub token_mint: Account<'info, Mint>,
-    pub token_program: Program<'info, Token>,
-}
-
-pub fn claim_global_random_reward(ctx: Context<ClaimGlobalRandomReward>) -> Result<()> {
-    let slot = Clock::get()?.slot;
-    let player = &mut ctx.accounts.player;
-    let gs = &mut ctx.accounts.global_state;
-    let token_mint = &ctx.accounts.token_mint.key();
-
-    let reward = gs
-        .global_random_reward
-        .as_ref()
-        .ok_or(WeedMinerError::NoPendingReward)?;
-    require!(slot <= reward.expiry_slot, WeedMinerError::RewardExpired);
-
-    // Check if player already claimed this reward (by reward_id)
-    require!(
-        player.last_claimed_global_reward_id < reward.reward_id,
-        WeedMinerError::RewardAlreadyClaimed
-    );
-
-    // Capture reward details
-    let reward_amount_to_mint = reward.amount;
-    let reward_id = reward.reward_id;
-
-    // === EFFECTS ===
-    // Update player's last claimed reward ID
-    player.last_claimed_global_reward_id = reward_id;
-
-    // === INTERACTIONS ===
-    // Mint reward to player
-    let seeds = &[
-        GLOBAL_STATE_SEED,
-        token_mint.as_ref(),
-        &[ctx.bumps.global_state],
-    ];
-    let signer = &[&seeds[..]];
-
-    token::mint_to(
-        CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            MintTo {
-                mint: ctx.accounts.token_mint.to_account_info(),
-                to: ctx.accounts.player_token_account.to_account_info(),
-                authority: gs.to_account_info(),
-            },
-            signer,
-        ),
-        reward_amount_to_mint,
-    )?;
-
-    Ok(())
-}
-
-#[derive(Accounts)]
 pub struct ResetPlayer<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     #[account(
         mut,
-        has_one = authority @ WeedMinerError::Unauthorized
+        has_one = authority @ PonzimonError::Unauthorized
     )]
     pub global_state: Account<'info, GlobalState>,
     #[account(
@@ -1016,20 +941,20 @@ pub fn reset_player(ctx: Context<ResetPlayer>) -> Result<()> {
     // Update pool to current slot
     update_pool(gs, slot);
 
-    // Store the old hashpower to update global state
-    let old_hashpower = player.hashpower;
+    // Store the old berry consumption to update global state
+    let old_berries = player.berries;
 
-    // Reset player's hashpower and facility
-    player.hashpower = 0;
-    player.facility = Facility {
-        facility_type: 0,
-        total_machines: 2,
-        power_output: 15,
+    // Reset player's berry consumption and farm
+    player.berries = 0;
+    player.farm = Farm {
+        farm_type: 0,
+        total_cards: 3,
+        berry_capacity: 15,
     };
-    player.machines = vec![]; // Clear all machines
+    player.cards = vec![]; // Clear all cards
 
-    // Update global hashpower
-    gs.total_hashpower = gs.total_hashpower.saturating_sub(old_hashpower);
+    // Update global berry consumption
+    gs.total_berries = gs.total_berries.saturating_sub(old_berries);
 
     // Update player's last claim slot and accumulator
     player.last_claim_slot = slot;
@@ -1044,8 +969,8 @@ pub struct GambleCommit<'info> {
     pub player_wallet: Signer<'info>,
     #[account(
         mut,
-        constraint = player.owner == player_wallet.key() @ WeedMinerError::Unauthorized,
-        constraint = !player.has_pending_gamble @ WeedMinerError::AlreadyHasPendingGamble,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
+        constraint = !player.has_pending_gamble @ PonzimonError::AlreadyHasPendingGamble,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -1067,7 +992,7 @@ pub struct GambleCommit<'info> {
     /// CHECK: This is the fees recipient wallet from global_state
     #[account(
         mut,
-        constraint = fees_wallet.key() == global_state.fees_wallet @ WeedMinerError::Unauthorized
+        constraint = fees_wallet.key() == global_state.fees_wallet @ PonzimonError::Unauthorized
     )]
     pub fees_wallet: AccountInfo<'info>,
     #[account(mut)]
@@ -1086,12 +1011,12 @@ pub fn gamble_commit(
     let gs = &mut ctx.accounts.global_state;
 
     // Check if production is enabled
-    require!(gs.production_enabled, WeedMinerError::ProductionDisabled);
+    require!(gs.production_enabled, PonzimonError::ProductionDisabled);
 
     // Check if player has enough tokens
     require!(
         ctx.accounts.player_token_account.amount >= amount,
-        WeedMinerError::InsufficientBits
+        PonzimonError::InsufficientBits
     );
 
     // Parse randomness data
@@ -1101,7 +1026,7 @@ pub fn gamble_commit(
     if randomness_data.seed_slot != clock.slot - 1 {
         msg!("seed_slot: {}", randomness_data.seed_slot);
         msg!("slot: {}", clock.slot);
-        return Err(WeedMinerError::RandomnessAlreadyRevealed.into());
+        return Err(PonzimonError::RandomnessAlreadyRevealed.into());
     }
 
     // Track the player's committed values
@@ -1153,8 +1078,8 @@ pub struct GambleSettle<'info> {
     pub player_wallet: Signer<'info>,
     #[account(
         mut,
-        constraint = player.owner == player_wallet.key() @ WeedMinerError::Unauthorized,
-        constraint = player.has_pending_gamble @ WeedMinerError::NoPendingGamble,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
+        constraint = player.has_pending_gamble @ PonzimonError::NoPendingGamble,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -1185,7 +1110,7 @@ pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
 
     // Verify that the provided randomness account matches the stored one
     if ctx.accounts.randomness_account_data.key() != player.randomness_account {
-        return Err(WeedMinerError::InvalidRandomnessAccount.into());
+        return Err(PonzimonError::InvalidRandomnessAccount.into());
     }
 
     // Parse randomness data
@@ -1193,13 +1118,13 @@ pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
         RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
 
     if randomness_data.seed_slot != player.commit_slot {
-        return Err(WeedMinerError::RandomnessExpired.into());
+        return Err(PonzimonError::RandomnessExpired.into());
     }
 
     // Get the revealed random value
     let revealed_random_value = randomness_data
         .get_value(&clock)
-        .map_err(|_| WeedMinerError::RandomnessNotResolved)?;
+        .map_err(|_| PonzimonError::RandomnessNotResolved)?;
 
     // Use revealed random value for slot machine odds (2.5% chance for 10x = ~75% house edge)
     let randomness_result = revealed_random_value[0] % 100 < 3; // ~3% chance to win

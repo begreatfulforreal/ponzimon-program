@@ -1,12 +1,12 @@
 use anchor_lang::prelude::*;
 
 #[error_code]
-pub enum WeedMinerError {
+pub enum PonzimonError {
     #[msg("Wallet age is less than 7 days")]
     WalletTooNew,
-    #[msg("Facility power capacity exceeded")]
+    #[msg("Farm power capacity exceeded")]
     PowerCapacityExceeded,
-    #[msg("Facility machine capacity exceeded")]
+    #[msg("Farm card capacity exceeded")]
     MachineCapacityExceeded,
     #[msg("Insufficient $WEED balance")]
     InsufficientBits,
@@ -16,14 +16,14 @@ pub enum WeedMinerError {
     CooldownNotExpired,
     #[msg("Production is disabled")]
     ProductionDisabled,
-    #[msg("Invalid machine type")]
+    #[msg("Invalid card type")]
     InvalidMachineType,
-    #[msg("Invalid facility type")]
-    InvalidFacilityType,
+    #[msg("Invalid farm type")]
+    InvalidFarmType,
     #[msg("Unauthorized access")]
     Unauthorized,
-    #[msg("Initial facility already purchased")]
-    InitialFacilityAlreadyPurchased,
+    #[msg("Initial farm already purchased")]
+    InitialFarmAlreadyPurchased,
     #[msg("Invalid referrer")]
     InvalidReferrer,
     #[msg("Invalid token mint")]
@@ -48,8 +48,8 @@ pub enum WeedMinerError {
     InvalidHalvingInterval,
     #[msg("Invalid dust threshold divisor, must be > 0")]
     InvalidDustThresholdDivisor,
-    #[msg("Current facility is not at maximum machine capacity for upgrade")]
-    FacilityNotFull,
+    #[msg("Current farm is not at maximum machine capacity for upgrade")]
+    FarmNotFull,
 
     // Switchboard randomness errors
     #[msg("Randomness already revealed")]
