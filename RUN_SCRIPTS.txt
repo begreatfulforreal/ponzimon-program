@@ -1,0 +1,6 @@
+ts-node cli/program.ts mint -k ~/.config/solana/aipool_test.json -m mint_test.json
+
+ts-node cli/program.ts transfer-authority -k ~/.config/solana/aipool_test.json  -m EGtEL3wUcAAiZ9oZrHGKbcC71XgRcZ2QGw8MLWurysBL
+
+ts-node cli/program.ts initialize-program -k ~/.config/solana/aipool_test.json -m EGtEL3wUcAAiZ9oZrHGKbcC71XgRcZ2QGw8MLWurysBL -f 8kvqgxQG77pv6RvEou8f2kHSWi3rtx8F7MksXUqNLGmn -h 47250 -t 21000000 -i 11 -c 100
+

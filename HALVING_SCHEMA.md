@@ -70,7 +70,4 @@ After 32 halvings (which takes <math xmlns="http://www.w3.org/1998/Math/MathML">
 
 
 
-halving_interval: 47,250 slots
-initial_reward_rate: 11 tokens per slot
-dust_threshold_divisor: 1,000,000
-total_supply: 1,000,000 tokens
+ ts-node cli/program.ts initialize-program -k ~/.config/solana/aipool_test.json -m EGtEL3wUcAAiZ9oZrHGKbcC71XgRcZ2QGw8MLWurysBL -f 8kvqgxQG77pv6RvEou8f2kHSWi3rtx8F7MksXUqNLGmn -h 47250 -t 21000000000000 -i 11 -c 100

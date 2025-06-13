@@ -41,10 +41,10 @@ const GLOBAL_STATE_SEED = "global_state";
 const GOVERNANCE_TOKEN_SEED = "governance_token";
 // Add metadata configuration
 const TOKEN_METADATA = {
-  name: "Ponzimon",
-  symbol: "POKE",
+  name: "testing",
+  symbol: "test",
   uri: "https://jade-brilliant-frog-932.mypinata.cloud/ipfs/bafkreigbbqqdqkga7cf7ylf67zc2mm6mua6ndvk7q4e2gpueevcwcfpgcq",
-  external_url: "https://ponzimon.gg",
+  external_url: "https://testing.gg",
 };
 
 const TOKEN_DECIMALS = 6;
@@ -215,7 +215,7 @@ async function initializeProgram(
       ASSOCIATED_TOKEN_PROGRAM_ID
     );
 
-    console.log("Initializing program...");
+    console.log("Initializing program...", totalSupplyArg);
     const HALVING_INTERVAL = new BN(halvingIntervalArg);
     const TOTAL_SUPPLY = new BN(Number(totalSupplyArg) * 10 ** TOKEN_DECIMALS);
     const INITIAL_REWARD_RATE = new BN(initialRewardRateArg);
@@ -243,7 +243,7 @@ async function initializeProgram(
 
     console.log("Transaction signature:", tx);
     console.log("Program initialized successfully!");
-    console.log("NEXT_PUBLIC_PROGRAM_ID =", globalStateKey.toString());
+    console.log("NEXT_PUBLIC_GLOBAL_STATE_KEY =", globalStateKey.toString());
     console.log("NEXT_PUBLIC_TOKEN_MINT =", tokenMint.toString());
     console.log("NEXT_PUBLIC_FEES_WALLET =", feesWallet.toString());
     console.log(
@@ -500,6 +500,7 @@ async function resetPlayer(
         globalState: globalStateKey,
         player: playerKey,
         playerWallet: playerWallet,
+        tokenMint: tokenMint,
       })
       .rpc();
 
@@ -616,16 +617,16 @@ program
     "-f, --fees-wallet <address>",
     "Fees recipient wallet address"
   )
-  .requiredOption("--halving-interval <number>", "Halving interval (slots)")
+  .requiredOption("-h, --halving-interval <number>", "Halving interval (slots)")
   .requiredOption(
-    "--total-supply <number>",
+    "-t, --total-supply <number>",
     "Total supply (integer, e.g. 21000000000000)"
   )
   .requiredOption(
-    "--initial-reward-rate <number>",
+    "-i, --initial-reward-rate <number>",
     "Initial reward rate (integer, e.g. 50000000)"
   )
-  .requiredOption("--cooldown-slots <number>", "Cooldown slots")
+  .requiredOption("-c, --cooldown-slots <number>", "Cooldown slots")
   .option(
     "-n, --network <url>",
     "Solana network URL",
