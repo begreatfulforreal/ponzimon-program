@@ -31,7 +31,7 @@ import {
   percentAmount,
   signerIdentity,
 } from "@metaplex-foundation/umi";
-import { Weedminer } from "../target/types/weedminer";
+import { Ponzimon } from "../target/types/ponzimon";
 
 import fs from "fs";
 import { Command } from "commander";
@@ -41,10 +41,10 @@ const GLOBAL_STATE_SEED = "global_state";
 const GOVERNANCE_TOKEN_SEED = "governance_token";
 // Add metadata configuration
 const TOKEN_METADATA = {
-  name: "Rand",
-  symbol: "RAND",
+  name: "Ponzimon",
+  symbol: "PONZI",
   uri: "https://jade-brilliant-frog-932.mypinata.cloud/ipfs/bafkreigbbqqdqkga7cf7ylf67zc2mm6mua6ndvk7q4e2gpueevcwcfpgcq",
-  external_url: "https://whatever.gg",
+  external_url: "https://ponzimon.gg",
 };
 
 const TOKEN_DECIMALS = 6;
@@ -103,7 +103,7 @@ async function mintToken(
     anchor.setProvider(provider);
 
     // Get program
-    const program = anchor.workspace.Weedminer as Program<Weedminer>;
+    const program = anchor.workspace.Ponzimon as Program<Ponzimon>;
 
     // Create token mint - either from custom keypair or generate new one
     console.log("Creating token mint...");
@@ -192,7 +192,7 @@ async function initializeProgram(
     anchor.setProvider(provider);
 
     // Get program
-    const program = anchor.workspace.Weedminer as Program<Weedminer>;
+    const program = anchor.workspace.Ponzimon as Program<Ponzimon>;
 
     // Get current slot
     const currentSlot = new BN(await provider.connection.getSlot());
@@ -286,7 +286,7 @@ async function updateParameters(
     anchor.setProvider(provider);
 
     // Get program
-    const program = anchor.workspace.Weedminer as Program<Weedminer>;
+    const program = anchor.workspace.Ponzimon as Program<Ponzimon>;
 
     // Get the global state key - you'll need to pass in the token mint address
     const tokenMint = new PublicKey(tokenMintAddress);
@@ -349,7 +349,7 @@ async function updatePoolManual(
     anchor.setProvider(provider);
 
     // Get program
-    const program = anchor.workspace.Weedminer as Program<Weedminer>;
+    const program = anchor.workspace.Ponzimon as Program<Ponzimon>;
 
     // Get the global state key - you'll need to pass in the token mint address
     const tokenMint = new PublicKey(tokenMintAddress);
@@ -399,7 +399,7 @@ async function transferMintAuthority(
     { commitment: "confirmed" }
   );
   anchor.setProvider(provider);
-  const program = anchor.workspace.Weedminer as anchor.Program<Weedminer>;
+  const program = anchor.workspace.Ponzimon as anchor.Program<Ponzimon>;
 
   // --- 3. Derive the global-state PDA that should receive authority ---
   const [globalStateKey] = PublicKey.findProgramAddressSync(
@@ -476,7 +476,7 @@ async function resetPlayer(
     anchor.setProvider(provider);
 
     // Get program
-    const program = anchor.workspace.Weedminer as Program<Weedminer>;
+    const program = anchor.workspace.Ponzimon as Program<Ponzimon>;
 
     // Get the global state key and player key - you'll need to pass in the token mint address and player wallet
     const tokenMint = new PublicKey(token); // Token mint should be passed as third argument
@@ -574,72 +574,12 @@ export async function withdrawSolAndToken(
   }
 }
 
-// Add this function near the other CLI logic functions
-async function generateGlobalRandomRewardCLI(
-  network: string,
-  keypairPath: string,
-  tokenMintAddress: string,
-  amount: string,
-  expirySlots: string
-) {
-  if (!keypairPath || !tokenMintAddress || !amount || !expirySlots) {
-    console.error(
-      "Usage: generate-global-reward --keypair <path> --mint <address> --amount <number> --expiry-slots <number>"
-    );
-    process.exit(1);
-  }
-
-  try {
-    // Load keypair from file
-    const keypairData = JSON.parse(fs.readFileSync(keypairPath, "utf-8"));
-    const wallet = Keypair.fromSecretKey(new Uint8Array(keypairData));
-
-    // Setup connection and provider
-    const connection = new anchor.web3.Connection(network);
-    const provider = new anchor.AnchorProvider(
-      connection,
-      new anchor.Wallet(wallet),
-      { commitment: "confirmed" }
-    );
-    anchor.setProvider(provider);
-
-    // Get program
-    const program = anchor.workspace.Weedminer as Program<Weedminer>;
-
-    // Derive global state PDA
-    const tokenMint = new PublicKey(tokenMintAddress);
-    const [globalStateKey] = PublicKey.findProgramAddressSync(
-      [Buffer.from(GLOBAL_STATE_SEED), tokenMint.toBuffer()],
-      program.programId
-    );
-
-    // Prepare arguments
-    const amountBN = new BN(amount); // amount should be in smallest units (e.g., 6 decimals)
-    const expirySlotsBN = new BN(expirySlots);
-
-    // Send transaction
-    const tx = await program.methods
-      .generateGlobalRandomReward(amountBN, expirySlotsBN)
-      .accountsStrict({
-        authority: wallet.publicKey,
-        globalState: globalStateKey,
-      })
-      .rpc();
-
-    console.log("Global random reward generated!");
-    console.log("Transaction signature:", tx);
-  } catch (error) {
-    console.error("Error:", error);
-    process.exit(1);
-  }
-}
-
 // Modify the bottom of the file to include the new command
 const program = new Command();
 
 program
-  .name("bitsol-cmd")
-  .description("CLI for Weedminer program management")
+  .name("ponzimon-cmd")
+  .description("CLI for Ponzimon program management")
   .version("1.0.0");
 
 program
@@ -816,7 +756,7 @@ program
     anchor.setProvider(provider);
 
     // Get program
-    const programInstance = anchor.workspace.Weedminer as Program<Weedminer>;
+    const programInstance = anchor.workspace.Ponzimon as Program<Ponzimon>;
 
     // Derive global state and governance token account
     const tokenMint = new PublicKey(opts.mint);
@@ -878,34 +818,6 @@ program
   });
 
 program
-  .command("generate-global-reward")
-  .description("Generate a global random reward (admin only)")
-  .requiredOption("-k, --keypair <path>", "Path to keypair file")
-  .requiredOption("-m, --mint <address>", "Token mint address")
-  .requiredOption(
-    "-a, --amount <number>",
-    "Reward amount (in smallest units, e.g. 1000000 for 1 token if 6 decimals)"
-  )
-  .requiredOption(
-    "-e, --expiry-slots <number>",
-    "Expiry slots (number of slots until reward expires)"
-  )
-  .option(
-    "-n, --network <url>",
-    "Solana network URL",
-    "https://api.devnet.solana.com"
-  )
-  .action(async (opts) => {
-    await generateGlobalRandomRewardCLI(
-      opts.network,
-      opts.keypair,
-      opts.mint,
-      opts.amount,
-      opts.expirySlots
-    );
-  });
-
-program
   .command("set-authority")
   .description(
     "Set mint authority to global state PDA and freeze authority to null"
@@ -930,7 +842,7 @@ program
       { commitment: "confirmed" }
     );
     anchor.setProvider(provider);
-    const programInstance = anchor.workspace.Weedminer as Program<Weedminer>;
+    const programInstance = anchor.workspace.Ponzimon as Program<Ponzimon>;
 
     // Derive the global state PDA
     const [globalStateKey] = PublicKey.findProgramAddressSync(
@@ -996,7 +908,7 @@ program
     anchor.setProvider(provider);
 
     // Get program
-    const programInstance = anchor.workspace.Weedminer as Program<Weedminer>;
+    const programInstance = anchor.workspace.Ponzimon as Program<Ponzimon>;
 
     // Fetch all GlobalState accounts
     const globalStates = await programInstance.account.globalState.all();
