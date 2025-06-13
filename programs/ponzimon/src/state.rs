@@ -39,8 +39,8 @@ pub struct GlobalState {
 pub struct Player {
     pub owner: Pubkey,
     pub farm: Farm,
-    pub cards: [Option<Card>; MAX_CARDS_PER_PLAYER as usize], // Support up to 200 cards total
-    pub card_count: u8,                                       // Track actual number of cards
+    pub cards: [Card; MAX_CARDS_PER_PLAYER as usize], // Support up to 200 cards total
+    pub card_count: u8,                               // Track actual number of cards
     pub staked_cards_bitset: u64, // Bitset tracking which cards are staked (supports up to 64 cards)
     pub berries: u64,             // Total berry consumption by all cards
     pub referrer: Option<Pubkey>,
@@ -76,7 +76,7 @@ pub struct Farm {
     pub berry_capacity: u64, // Total berry capacity of this farm
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default)]
 pub struct Card {
     pub id: u16,               // Card ID from the Pokemon card list
     pub rarity: u8, // Card rarity (0=Common, 1=Uncommon, 2=Rare, 3=VeryRare, 4=SuperRare, 5=MegaRare)

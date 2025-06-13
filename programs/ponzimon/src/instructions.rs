@@ -54,7 +54,7 @@ impl Player {
             (self.card_count as usize) < MAX_CARDS_PER_PLAYER as usize,
             PonzimonError::MachineCapacityExceeded
         );
-        self.cards[self.card_count as usize] = Some(card);
+        self.cards[self.card_count as usize] = card;
         self.card_count += 1;
         Ok(())
     }
@@ -68,11 +68,11 @@ impl Player {
 
         // Shift all cards after the removed card to fill the gap
         for i in index_usize..(self.card_count as usize - 1) {
-            self.cards[i] = self.cards[i + 1].clone();
+            self.cards[i] = self.cards[i + 1];
         }
 
-        // Clear the last slot
-        self.cards[(self.card_count - 1) as usize] = None;
+        // Clear the last slot (set to default/zero values)
+        self.cards[(self.card_count - 1) as usize] = Card::default();
         self.card_count -= 1;
 
         // Update bitset - shift down any staked cards that were after the removed card
@@ -135,9 +135,8 @@ impl Player {
         let mut total = 0u64;
         for i in 0..self.card_count {
             if self.is_card_staked(i) {
-                if let Some(card) = &self.cards[i as usize] {
-                    total += card.berry_consumption as u64;
-                }
+                let card = &self.cards[i as usize];
+                total += card.berry_consumption as u64;
             }
         }
         total
@@ -398,7 +397,7 @@ pub struct PurchaseInitialFarm<'info> {
         space = 8      // discriminator
             + 32       // owner
             + 10       // farm
-            + (MAX_CARDS_PER_PLAYER as usize * (1 + 17)) // cards: [Option<Card>; MAX_CARDS_PER_PLAYER] - Option<Card> = 1 + 17 bytes
+            + (MAX_CARDS_PER_PLAYER as usize * 6) // cards: [Card; MAX_CARDS_PER_PLAYER] - Card = 6 bytes
             + 1        // card_count: u8
             + 8        // staked_cards_bitset: u64
             + 8        // berries
@@ -510,7 +509,7 @@ pub fn purchase_initial_farm(
     };
 
     // Initialize arrays
-    player.cards = [None; MAX_CARDS_PER_PLAYER as usize];
+    player.cards = [Card::default(); MAX_CARDS_PER_PLAYER as usize];
     player.card_count = 0;
     player.staked_cards_bitset = 0; // No cards staked initially
 
@@ -696,9 +695,7 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
         PonzimonError::MachineCapacityExceeded
     );
 
-    let card = player.cards[card_index as usize]
-        .as_ref()
-        .ok_or(PonzimonError::CardIndexOutOfBounds)?;
+    let card = &player.cards[card_index as usize];
     let card_berry_consumption = card.berry_consumption as u64;
 
     // Security: Use safe arithmetic for berry calculations
@@ -767,9 +764,7 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
         PonzimonError::CardNotStaked
     );
 
-    let card = player.cards[card_index as usize]
-        .as_ref()
-        .ok_or(PonzimonError::CardIndexOutOfBounds)?;
+    let card = &player.cards[card_index as usize];
     let card_berry_consumption = card.berry_consumption as u64;
 
     // Security: Use safe arithmetic for berry calculations
@@ -1331,7 +1326,7 @@ pub fn reset_player(ctx: Context<ResetPlayer>) -> Result<()> {
         total_cards: 2,
         berry_capacity: 15,
     };
-    player.cards = [None; MAX_CARDS_PER_PLAYER as usize]; // Clear all cards
+    player.cards = [Card::default(); MAX_CARDS_PER_PLAYER as usize]; // Clear all cards
     player.card_count = 0;
     player.staked_cards_bitset = 0; // Clear all staked cards
 
@@ -1699,10 +1694,9 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
     // Calculate total berry consumption of cards to be removed
     let mut total_berry_reduction = 0u64;
     for &index in &recycled_indices {
-        if let Some(card) = &player.cards[index as usize] {
-            if player.is_card_staked(index) {
-                total_berry_reduction += card.berry_consumption as u64;
-            }
+        let card = &player.cards[index as usize];
+        if player.is_card_staked(index) {
+            total_berry_reduction += card.berry_consumption as u64;
         }
     }
 
