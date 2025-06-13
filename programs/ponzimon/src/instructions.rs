@@ -507,9 +507,8 @@ pub fn purchase_initial_farm(
     player.staked_indices = [0; MAX_STAKED_CARDS_PER_PLAYER as usize];
     player.staked_count = 0;
 
-    // Give player 3 starter cards using the IDs from data.ts
-    let mut total_berry_consumption = 0u64;
-    for (i, &card_id) in STARTER_CARD_IDS.iter().enumerate() {
+    // Give player 3 starter cards using the IDs from data.ts (not staked initially)
+    for &card_id in STARTER_CARD_IDS.iter() {
         if let Some((rarity, power, berry_consumption)) = get_card_by_id(card_id) {
             let card = Card {
                 id: card_id,
@@ -518,12 +517,10 @@ pub fn purchase_initial_farm(
                 berry_consumption,
             };
             player.add_card(card)?;
-            player.add_staked_index(i as u8)?;
-            total_berry_consumption += berry_consumption as u64;
         }
     }
 
-    player.berries = total_berry_consumption; // Total berry consumption
+    player.berries = 0; // No cards staked initially
     player.referrer = referrer;
     player.last_claim_slot = slot;
     player.last_upgrade_slot = slot;
@@ -549,8 +546,8 @@ pub fn purchase_initial_farm(
     player.recycle_commit_slot = 0;
     player.recycle_card_indices = [0; 10];
 
-    // global stats (Effect)
-    gs.total_berries += total_berry_consumption;
+    // global stats (Effect) - no initial berry consumption since cards aren't staked
+    // gs.total_berries += 0; // No change needed
 
     emit!(InitialFarmPurchased {
         player_wallet: ctx.accounts.player_wallet.key(),
@@ -558,7 +555,7 @@ pub fn purchase_initial_farm(
         referrer,
         farm_type: player.farm.farm_type,
         initial_cards: player.card_count,
-        initial_hashpower: player.berries,
+        initial_hashpower: player.berries, // 0 since no cards are staked initially
         slot,
     });
 
