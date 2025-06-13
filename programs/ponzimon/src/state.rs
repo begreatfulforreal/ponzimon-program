@@ -41,9 +41,8 @@ pub struct Player {
     pub farm: Farm,
     pub cards: [Option<Card>; MAX_CARDS_PER_PLAYER as usize], // Support up to 200 cards total
     pub card_count: u8,                                       // Track actual number of cards
-    pub staked_indices: [u8; MAX_STAKED_CARDS_PER_PLAYER as usize], // Support up to 50 staked cards
-    pub staked_count: u8,                                     // Track actual number of staked cards
-    pub berries: u64, // Total berry consumption by all cards
+    pub staked_cards_bitset: u64, // Bitset tracking which cards are staked (supports up to 64 cards)
+    pub berries: u64,             // Total berry consumption by all cards
     pub referrer: Option<Pubkey>,
     pub last_acc_tokens_per_berry: u128,
     pub last_claim_slot: u64,

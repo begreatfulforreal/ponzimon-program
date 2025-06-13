@@ -75,63 +75,72 @@ impl Player {
         self.cards[(self.card_count - 1) as usize] = None;
         self.card_count -= 1;
 
-        // Update staked indices - shift down any indices that were after the removed card
-        for i in 0..(self.staked_count as usize) {
-            if self.staked_indices[i] > index {
-                self.staked_indices[i] -= 1;
+        // Update bitset - shift down any staked cards that were after the removed card
+        let original_card_count = self.card_count;
+        let mut new_bitset = 0u64;
+
+        for i in 0..original_card_count {
+            let old_mask = 1u64 << i;
+            if self.staked_cards_bitset & old_mask != 0 {
+                if i < index {
+                    // Cards before the removed card stay in the same position
+                    new_bitset |= old_mask;
+                } else if i > index {
+                    // Cards after the removed card shift down by 1
+                    new_bitset |= 1u64 << (i - 1);
+                }
+                // Cards at the removed index are automatically unstaked
             }
         }
+
+        self.staked_cards_bitset = new_bitset;
 
         Ok(())
     }
 
-    pub fn add_staked_index(&mut self, index: u8) -> Result<()> {
+    pub fn stake_card(&mut self, index: u8) -> Result<()> {
+        require!(index < 64, PonzimonError::CardIndexOutOfBounds);
+        let mask = 1u64 << index;
         require!(
-            (self.staked_count as usize) < MAX_STAKED_CARDS_PER_PLAYER as usize,
-            PonzimonError::MachineCapacityExceeded
+            self.staked_cards_bitset & mask == 0,
+            PonzimonError::CardIsStaked
         );
-
-        // Check if already staked
-        for i in 0..(self.staked_count as usize) {
-            require!(self.staked_indices[i] != index, PonzimonError::CardIsStaked);
-        }
-
-        self.staked_indices[self.staked_count as usize] = index;
-        self.staked_count += 1;
+        self.staked_cards_bitset |= mask;
         Ok(())
     }
 
-    pub fn remove_staked_index(&mut self, index: u8) -> Result<()> {
-        let mut found_index = None;
-
-        // Find the index in staked_indices
-        for i in 0..(self.staked_count as usize) {
-            if self.staked_indices[i] == index {
-                found_index = Some(i);
-                break;
-            }
-        }
-
-        require!(found_index.is_some(), PonzimonError::CardNotStaked);
-
-        let found_i = found_index.unwrap();
-
-        // Shift remaining staked indices to fill the gap
-        for i in found_i..(self.staked_count as usize - 1) {
-            self.staked_indices[i] = self.staked_indices[i + 1];
-        }
-
-        self.staked_count -= 1;
+    pub fn unstake_card(&mut self, index: u8) -> Result<()> {
+        require!(index < 64, PonzimonError::CardIndexOutOfBounds);
+        let mask = 1u64 << index;
+        require!(
+            self.staked_cards_bitset & mask != 0,
+            PonzimonError::CardNotStaked
+        );
+        self.staked_cards_bitset &= !mask;
         Ok(())
     }
 
     pub fn is_card_staked(&self, index: u8) -> bool {
-        for i in 0..(self.staked_count as usize) {
-            if self.staked_indices[i] == index {
-                return true;
+        if index >= 64 {
+            return false;
+        }
+        (self.staked_cards_bitset & (1u64 << index)) != 0
+    }
+
+    pub fn count_staked_cards(&self) -> u8 {
+        self.staked_cards_bitset.count_ones() as u8
+    }
+
+    pub fn calculate_total_berry_consumption(&self) -> u64 {
+        let mut total = 0u64;
+        for i in 0..self.card_count {
+            if self.is_card_staked(i) {
+                if let Some(card) = &self.cards[i as usize] {
+                    total += card.berry_consumption as u64;
+                }
             }
         }
-        false
+        total
     }
 }
 
@@ -391,8 +400,7 @@ pub struct PurchaseInitialFarm<'info> {
             + 10       // farm
             + (MAX_CARDS_PER_PLAYER as usize * (1 + 17)) // cards: [Option<Card>; MAX_CARDS_PER_PLAYER] - Option<Card> = 1 + 17 bytes
             + 1        // card_count: u8
-            + MAX_STAKED_CARDS_PER_PLAYER as usize       // staked_indices: [u8; MAX_STAKED_CARDS_PER_PLAYER]
-            + 1        // staked_count: u8
+            + 8        // staked_cards_bitset: u64
             + 8        // berries
             + 33       // referrer
             + 16       // last_acc_tokens_per_berry
@@ -504,8 +512,7 @@ pub fn purchase_initial_farm(
     // Initialize arrays
     player.cards = [None; MAX_CARDS_PER_PLAYER as usize];
     player.card_count = 0;
-    player.staked_indices = [0; MAX_STAKED_CARDS_PER_PLAYER as usize];
-    player.staked_count = 0;
+    player.staked_cards_bitset = 0; // No cards staked initially
 
     // Give player 3 starter cards using the IDs from data.ts (not staked initially)
     for &card_id in STARTER_CARD_IDS.iter() {
@@ -685,7 +692,7 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
         PonzimonError::CardIsStaked // Using for "already staked"
     );
     require!(
-        (player.staked_count as usize) < player.farm.total_cards as usize,
+        player.count_staked_cards() < player.farm.total_cards,
         PonzimonError::MachineCapacityExceeded
     );
 
@@ -704,7 +711,7 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
     );
 
     // Effects
-    player.add_staked_index(card_index)?;
+    player.stake_card(card_index)?;
     player.berries = new_player_berries;
     gs.total_berries = new_total_berries;
 
@@ -770,7 +777,7 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
     let new_total_berries = safe_sub_berries(gs.total_berries, card_berry_consumption)?;
 
     // Effects
-    player.remove_staked_index(card_index)?;
+    player.unstake_card(card_index)?;
     player.berries = new_player_berries;
     gs.total_berries = new_total_berries;
 
@@ -1326,8 +1333,7 @@ pub fn reset_player(ctx: Context<ResetPlayer>) -> Result<()> {
     };
     player.cards = [None; MAX_CARDS_PER_PLAYER as usize]; // Clear all cards
     player.card_count = 0;
-    player.staked_indices = [0; MAX_STAKED_CARDS_PER_PLAYER as usize];
-    player.staked_count = 0;
+    player.staked_cards_bitset = 0; // Clear all staked cards
 
     // Update global berry consumption
     gs.total_berries = gs.total_berries.saturating_sub(old_berries);
