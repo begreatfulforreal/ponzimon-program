@@ -76,12 +76,26 @@ pub mod ponzimon {
         instructions::purchase_initial_farm(ctx, referrer)
     }
 
-    pub fn open_booster(ctx: Context<OpenBooster>) -> Result<()> {
-        instructions::open_booster(ctx)
+    pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
+        instructions::stake_card(ctx, card_index)
     }
 
-    pub fn sell_card(ctx: Context<SellCard>, card_index: u8) -> Result<()> {
-        instructions::sell_card(ctx, card_index)
+    pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
+        instructions::unstake_card(ctx, card_index)
+    }
+
+    pub fn discard_card(ctx: Context<DiscardCard>, card_index: u8) -> Result<()> {
+        instructions::discard_card(ctx, card_index)
+    }
+
+    pub fn request_open_booster(
+        ctx: Context<RequestOpenBooster>,
+        randomness_account: Pubkey,
+    ) -> Result<()> {
+        instructions::request_open_booster(ctx, randomness_account)
+    }
+    pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
+        instructions::settle_open_booster(ctx)
     }
 
     pub fn upgrade_farm(ctx: Context<UpgradeFarm>, farm_type: u8) -> Result<()> {

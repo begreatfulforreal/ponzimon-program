@@ -29,22 +29,22 @@ pub const PROMO_CARD: u8 = 8;
 pub const FIRST_EDITION_CARD: u8 = 9;
 
 // === Farm configurations =================================================
-// format: (total_cards, berry_capacity, cost_in_microBITS)
+// format: (total_cards, berry_capacity, cost_in_microtokens)
 pub const FARM_CONFIGS: [(u8, u64, u64); 10] = [
-    (3, 15, 50_000_000),       // Starter Hut       –  50  BITS, 15 berry capacity
-    (5, 30, 120_000_000),      // Cozy Cabin        – 120  BITS, 30 berry capacity
-    (8, 60, 300_000_000),      // Pokemon Center    – 300  BITS, 60 berry capacity
-    (12, 120, 600_000_000),    // Trainer Academy   – 600  BITS, 120 berry capacity
-    (16, 240, 1200_000_000),   // Gym Farm          – 1200 BITS, 240 berry capacity
-    (20, 480, 2400_000_000),   // Pokemon Lab       – 2400 BITS, 480 berry capacity
-    (25, 960, 4800_000_000),   // Elite Tower       – 4800 BITS, 960 berry capacity
-    (30, 1920, 9600_000_000),  // Champion Hall     – 9600 BITS, 1920 berry capacity
-    (40, 3840, 19200_000_000), // Legendary Sanctuary – 19200 BITS, 3840 berry capacity
-    (50, 7680, 38400_000_000), // Master Arena      – 38400 BITS, 7680 berry capacity
+    (3, 15, 50_000_000),       // Starter Hut       –  50  tokens, 15 berry capacity
+    (5, 30, 120_000_000),      // Cozy Cabin        – 120  tokens, 30 berry capacity
+    (8, 60, 300_000_000),      // Pokemon Center    – 300  tokens, 60 berry capacity
+    (12, 120, 600_000_000),    // Trainer Academy   – 600  tokens, 120 berry capacity
+    (16, 240, 1200_000_000),   // Gym Farm          – 1200 tokens, 240 berry capacity
+    (20, 480, 2400_000_000),   // Pokemon Lab       – 2400 tokens, 480 berry capacity
+    (25, 960, 4800_000_000),   // Elite Tower       – 4800 tokens, 960 berry capacity
+    (30, 1920, 9600_000_000),  // Champion Hall     – 9600 tokens, 1920 berry capacity
+    (40, 3840, 19200_000_000), // Legendary Sanctuary – 19200 tokens, 3840 berry capacity
+    (50, 7680, 38400_000_000), // Master Arena      – 38400 tokens, 7680 berry capacity
 ];
 
 // === Card configurations ====================================================
-// format: (card_power, berry_consumption, cost_in_microBITS)
+// format: (card_power, berry_consumption, cost_in_microtokens)
 pub const CARD_CONFIGS: [(u64, u64, u64); 10] = [
     (100, 3, 10_000_000),       // Common Card - 3 berries/slot
     (250, 5, 25_000_000),       // Uncommon Card - 5 berries/slot

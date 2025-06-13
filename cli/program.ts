@@ -42,7 +42,7 @@ const GOVERNANCE_TOKEN_SEED = "governance_token";
 // Add metadata configuration
 const TOKEN_METADATA = {
   name: "Ponzimon",
-  symbol: "PONZI",
+  symbol: "POKE",
   uri: "https://jade-brilliant-frog-932.mypinata.cloud/ipfs/bafkreigbbqqdqkga7cf7ylf67zc2mm6mua6ndvk7q4e2gpueevcwcfpgcq",
   external_url: "https://ponzimon.gg",
 };

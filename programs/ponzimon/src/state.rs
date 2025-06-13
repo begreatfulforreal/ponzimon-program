@@ -4,7 +4,7 @@ use anchor_lang::prelude::*;
 pub struct GlobalState {
     /* ── governance ─────────────────────────────── */
     pub authority: Pubkey,   // Governance authority
-    pub token_mint: Pubkey,  // BITS token mint
+    pub token_mint: Pubkey,  // Token mint
     pub fees_wallet: Pubkey, // Wallet that receives SOL and token fees
 
     /* ── emission mechanics ─────────────────────── */
@@ -14,14 +14,14 @@ pub struct GlobalState {
     pub start_slot: u64,         // Genesis slot
     pub halving_interval: u64,   // Slots between halvings
     pub last_processed_halvings: u64,
-    pub initial_reward_rate: u64, // Reward per slot at genesis
-    pub current_reward_rate: u64, // Cached reward per slot "now"
-    pub acc_bits_per_hash: u128,  // 1e12-scaled accumulator
-    pub last_reward_slot: u64,    // When `acc_bits_per_hash` was last bumped
+    pub initial_reward_rate: u64,   // Reward per slot at genesis
+    pub current_reward_rate: u64,   // Cached reward per slot "now"
+    pub acc_tokens_per_berry: u128, // 1e12-scaled accumulator
+    pub last_reward_slot: u64,      // When `acc_tokens_per_berry` was last bumped
 
     /* ── economic params ────────────────────────── */
-    pub burn_rate: u8,               // % of BITS cost burned (default 75)
-    pub referral_fee: u8,            // ‰ (per-mille) paid to referrer (default 25 => 2.5 %)
+    pub burn_rate: u8,               // % of token cost burned (default 75)
+    pub referral_fee: u8,            // % of rewards to referrer (default 25)
     pub production_enabled: bool,    // Global kill-switch
     pub cooldown_slots: u64,         // Farm upgrade cooldown
     pub dust_threshold_divisor: u64, // Divisor for total_supply to get dust_threshold (default 1000 for 0.1%)
@@ -39,9 +39,10 @@ pub struct Player {
     pub owner: Pubkey,
     pub farm: Farm,
     pub cards: Vec<Card>,
+    pub staked_indices: Vec<u8>,
     pub berries: u64, // Total berry consumption by all cards
     pub referrer: Option<Pubkey>,
-    pub last_acc_bits_per_hash: u128,
+    pub last_acc_tokens_per_berry: u128,
     pub last_claim_slot: u64,
     pub last_upgrade_slot: u64,
     pub total_rewards: u64,
@@ -53,6 +54,11 @@ pub struct Player {
     pub commit_slot: u64,           // The slot at which the randomness was committed
     pub current_gamble_amount: u64, // Amount currently being gambled
     pub has_pending_gamble: bool,   // Whether there's a pending gamble to settle
+
+    // Booster Packs
+    pub has_pending_booster: bool,
+    pub booster_randomness_account: Pubkey,
+    pub booster_commit_slot: u64,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]

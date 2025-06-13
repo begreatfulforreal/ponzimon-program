@@ -8,8 +8,8 @@ pub enum PonzimonError {
     PowerCapacityExceeded,
     #[msg("Farm card capacity exceeded")]
     MachineCapacityExceeded,
-    #[msg("Insufficient $WEED balance")]
-    InsufficientBits,
+    #[msg("Insufficient tokens balance")]
+    InsufficientTokens,
     #[msg("Insufficient lamports")]
     InsufficientLamports,
     #[msg("Cooldown not expired")]
@@ -64,4 +64,14 @@ pub enum PonzimonError {
     NoPendingGamble,
     #[msg("Player already has a pending gamble")]
     AlreadyHasPendingGamble,
+
+    // New error variants for staked cards and booster packs
+    #[msg("This card is currently staked and cannot be discarded.")]
+    CardIsStaked,
+    #[msg("This card is not staked.")]
+    CardNotStaked,
+    #[msg("Player already has a pending booster pack request.")]
+    BoosterAlreadyPending,
+    #[msg("Player does not have a pending booster pack to settle.")]
+    NoBoosterPending,
 }
