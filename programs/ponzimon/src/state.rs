@@ -1,3 +1,4 @@
+use crate::constants::*;
 use anchor_lang::prelude::*;
 
 #[account]
@@ -38,8 +39,10 @@ pub struct GlobalState {
 pub struct Player {
     pub owner: Pubkey,
     pub farm: Farm,
-    pub cards: Vec<Card>,
-    pub staked_indices: Vec<u8>,
+    pub cards: [Option<Card>; MAX_CARDS_PER_PLAYER as usize], // Support up to 200 cards total
+    pub card_count: u8,                                       // Track actual number of cards
+    pub staked_indices: [u8; MAX_STAKED_CARDS_PER_PLAYER as usize], // Support up to 50 staked cards
+    pub staked_count: u8,                                     // Track actual number of staked cards
     pub berries: u64, // Total berry consumption by all cards
     pub referrer: Option<Pubkey>,
     pub last_acc_tokens_per_berry: u128,
@@ -68,11 +71,12 @@ pub struct Farm {
     pub berry_capacity: u64, // Total berry capacity of this farm
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy)]
 pub struct Card {
-    pub card_type: u8,          // Type of Pokemon card
-    pub card_power: u64,        // Power level of the card for rewards
-    pub berry_consumption: u64, // How many berries this card consumes per slot
+    pub id: u16,               // Card ID from the Pokemon card list
+    pub rarity: u8, // Card rarity (0=Common, 1=Uncommon, 2=Rare, 3=VeryRare, 4=SuperRare, 5=MegaRare)
+    pub power: u16, // Power level of the card for rewards (max 65535 is enough)
+    pub berry_consumption: u8, // How many berries this card consumes per slot (max 255 is enough)
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]

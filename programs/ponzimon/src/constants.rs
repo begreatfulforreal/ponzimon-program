@@ -6,59 +6,240 @@ pub const ACC_SCALE: u128 = 1_000_000_000_000; // 1e12
 
 // Security constants
 pub const MIN_RANDOMNESS_DELAY_SLOTS: u64 = 3; // Minimum slots between commit and settle
-pub const MAX_CARDS_PER_PLAYER: u8 = 50; // Maximum cards a player can have
-pub const MAX_FARM_TYPE: u8 = 9; // Maximum valid farm type (MASTER_ARENA)
+pub const MAX_CARDS_PER_PLAYER: u8 = 150; // Maximum cards a player can have
+pub const MAX_STAKED_CARDS_PER_PLAYER: u8 = 25; // Maximum staked cards a player can have
+pub const MAX_FARM_TYPE: u8 = 10; // Maximum valid farm type
 
-// Farm Types (10 farms now)
-pub const STARTER_HUT: u8 = 0;
-pub const COZY_CABIN: u8 = 1;
-pub const POKEMON_CENTER: u8 = 2;
-pub const TRAINER_ACADEMY: u8 = 3;
-pub const GYM_FARM: u8 = 4;
-pub const POKEMON_LAB: u8 = 5;
-pub const ELITE_TOWER: u8 = 6;
-pub const CHAMPION_HALL: u8 = 7;
-pub const LEGENDARY_SANCTUARY: u8 = 8;
-pub const MASTER_ARENA: u8 = 9;
+// Card Rarities (matching TypeScript CardRarity enum)
+pub const COMMON: u8 = 0;
+pub const UNCOMMON: u8 = 1;
+pub const RARE: u8 = 2;
+pub const DOUBLE_RARE: u8 = 3; // Mapped from DoubleRare
+pub const VERY_RARE: u8 = 4; // Mapped from VeryRare
+pub const SUPER_RARE: u8 = 5; // Mapped from SuperRare
+pub const MEGA_RARE: u8 = 6; // Mapped from MegaRare
 
-// Card Types (Pokemon cards)
-pub const COMMON_CARD: u8 = 0;
-pub const UNCOMMON_CARD: u8 = 1;
-pub const RARE_CARD: u8 = 2;
-pub const HOLO_RARE_CARD: u8 = 3;
-pub const ULTRA_RARE_CARD: u8 = 4;
-pub const SECRET_RARE_CARD: u8 = 5;
-pub const LEGENDARY_CARD: u8 = 6;
-pub const MYTHICAL_CARD: u8 = 7;
-pub const PROMO_CARD: u8 = 8;
-pub const FIRST_EDITION_CARD: u8 = 9;
+// Initial starter card IDs from data.ts
+pub const STARTER_CARD_IDS: [u16; 3] = [179, 175, 147]; // Glowhare, Flitterfrog, Sunnyotter
 
-// === Farm configurations =================================================
+// === Farm configurations (matching farmList from data.ts) =================================================
 // format: (total_cards, berry_capacity, cost_in_microtokens)
-pub const FARM_CONFIGS: [(u8, u64, u64); 10] = [
-    (3, 15, 50_000_000),       // Starter Hut       –  50  tokens, 15 berry capacity
-    (5, 30, 120_000_000),      // Cozy Cabin        – 120  tokens, 30 berry capacity
-    (8, 60, 300_000_000),      // Pokemon Center    – 300  tokens, 60 berry capacity
-    (12, 120, 600_000_000),    // Trainer Academy   – 600  tokens, 120 berry capacity
-    (16, 240, 1200_000_000),   // Gym Farm          – 1200 tokens, 240 berry capacity
-    (20, 480, 2400_000_000),   // Pokemon Lab       – 2400 tokens, 480 berry capacity
-    (25, 960, 4800_000_000),   // Elite Tower       – 4800 tokens, 960 berry capacity
-    (30, 1920, 9600_000_000),  // Champion Hall     – 9600 tokens, 1920 berry capacity
-    (40, 3840, 19200_000_000), // Legendary Sanctuary – 19200 tokens, 3840 berry capacity
-    (50, 7680, 38400_000_000), // Master Arena      – 38400 tokens, 7680 berry capacity
+// Note: Converting costs from data.ts to microtokens (multiply by 1_000_000)
+pub const FARM_CONFIGS: [(u8, u64, u64); 11] = [
+    (0, 0, 0),                    // Level 0 - Initial state before buying first farm
+    (2, 15, 0), // Level 1 - slotQuantity: 2, berryAvailable: 15, cost: 0 (first farm free)
+    (4, 30, 100_000_000), // Level 2 - slotQuantity: 4, berryAvailable: 30, cost: 100 tokens
+    (7, 60, 200_000_000), // Level 3 - slotQuantity: 7, berryAvailable: 60, cost: 200 tokens
+    (10, 120, 400_000_000), // Level 4 - slotQuantity: 10, berryAvailable: 120, cost: 400 tokens
+    (13, 250, 800_000_000), // Level 5 - slotQuantity: 13, berryAvailable: 250, cost: 800 tokens
+    (16, 500, 1_600_000_000), // Level 6 - slotQuantity: 16, berryAvailable: 500, cost: 1600 tokens
+    (19, 1_000, 3_200_000_000), // Level 7 - slotQuantity: 19, berryAvailable: 1000, cost: 3200 tokens
+    (22, 2_000, 6_400_000_000), // Level 8 - slotQuantity: 22, berryAvailable: 2000, cost: 6400 tokens
+    (24, 4_000, 12_800_000_000), // Level 9 - slotQuantity: 24, berryAvailable: 4000, cost: 12800 tokens
+    (25, 30_000, 30_000_000_000), // Level 10 - slotQuantity: 25, berryAvailable: 30000, cost: 30000 tokens
 ];
 
-// === Card configurations ====================================================
-// format: (card_power, berry_consumption, cost_in_microtokens)
-pub const CARD_CONFIGS: [(u64, u64, u64); 10] = [
-    (100, 3, 10_000_000),       // Common Card - 3 berries/slot
-    (250, 5, 25_000_000),       // Uncommon Card - 5 berries/slot
-    (500, 8, 50_000_000),       // Rare Card - 8 berries/slot
-    (1000, 12, 100_000_000),    // Holo Rare Card - 12 berries/slot
-    (2000, 20, 200_000_000),    // Ultra Rare Card - 20 berries/slot
-    (4000, 32, 400_000_000),    // Secret Rare Card - 32 berries/slot
-    (8000, 50, 800_000_000),    // Legendary Card - 50 berries/slot
-    (16000, 80, 1600_000_000),  // Mythical Card - 80 berries/slot
-    (32000, 120, 3200_000_000), // Promo Card - 120 berries/slot
-    (64000, 200, 6400_000_000), // First Edition Card - 200 berries/slot
+// === Card data from pokemonCardList in data.ts ====================================================
+// format: (id, rarity, power, berry_consumption)
+// This is a comprehensive list of all 191 cards from the TypeScript data
+pub const CARD_DATA: [(u16, u8, u16, u8); 191] = [
+    (1, MEGA_RARE, 98, 22),   // Zephyrdrake
+    (2, MEGA_RARE, 105, 24),  // Bloomingo
+    (3, MEGA_RARE, 110, 25),  // Glaciowl
+    (4, SUPER_RARE, 55, 13),  // Terraclaw
+    (5, SUPER_RARE, 62, 15),  // Voltibra
+    (6, SUPER_RARE, 48, 11),  // Aquarion
+    (7, SUPER_RARE, 68, 16),  // Nocthorn
+    (8, SUPER_RARE, 51, 12),  // Sylphox
+    (9, SUPER_RARE, 70, 16),  // Pyroquill
+    (10, VERY_RARE, 33, 8),   // Thornbuck
+    (11, VERY_RARE, 38, 9),   // Emberox
+    (12, VERY_RARE, 29, 7),   // Fungorilla
+    (13, VERY_RARE, 40, 9),   // Gustling
+    (14, VERY_RARE, 26, 6),   // Cobaltoad
+    (15, VERY_RARE, 35, 8),   // Miragehare
+    (16, VERY_RARE, 31, 7),   // Aquadrift
+    (17, VERY_RARE, 28, 6),   // Photonix
+    (18, VERY_RARE, 37, 8),   // Soniclaw
+    (19, VERY_RARE, 30, 7),   // Luminpaca
+    (20, VERY_RARE, 27, 6),   // Terrashock
+    (21, VERY_RARE, 39, 9),   // Frostox
+    (22, DOUBLE_RARE, 20, 5), // Hydropeck
+    (23, DOUBLE_RARE, 24, 6), // Pyroclam
+    (24, DOUBLE_RARE, 17, 4), // Vinemoth
+    (25, DOUBLE_RARE, 22, 5), // Rockaroo
+    (26, DOUBLE_RARE, 19, 4), // Aeropup
+    (27, DOUBLE_RARE, 25, 6), // Chronoray
+    (28, DOUBLE_RARE, 16, 4), // Floranox
+    (29, DOUBLE_RARE, 23, 5), // Echowing
+    (30, DOUBLE_RARE, 18, 4), // Quartzmite
+    (31, DOUBLE_RARE, 21, 5), // Voltannut
+    (32, DOUBLE_RARE, 20, 5), // Blizzear
+    (33, DOUBLE_RARE, 24, 6), // Ravenguard
+    (34, DOUBLE_RARE, 17, 4), // Glideon
+    (35, DOUBLE_RARE, 22, 5), // Miretoad
+    (36, DOUBLE_RARE, 19, 4), // Pyrolupus
+    (37, DOUBLE_RARE, 25, 6), // Borealynx
+    (38, DOUBLE_RARE, 16, 4), // Pyrokoala
+    (39, DOUBLE_RARE, 23, 5), // Aquaphant
+    (40, DOUBLE_RARE, 18, 4), // Chromacock
+    (41, DOUBLE_RARE, 21, 5), // Terrashield
+    (42, RARE, 13, 3),        // Gustgoat
+    (43, RARE, 15, 3),        // Ignissquito
+    (44, RARE, 11, 2),        // Fernbear
+    (45, RARE, 14, 3),        // Shardster
+    (46, RARE, 12, 2),        // Lumishark
+    (47, RARE, 15, 3),        // Terrapotta
+    (48, RARE, 11, 2),        // Cacteagle
+    (49, RARE, 14, 3),        // Volticula
+    (50, RARE, 12, 2),        // Shadewolf
+    (51, RARE, 15, 3),        // Pyrotherium
+    (52, RARE, 11, 2),        // Nimbusquid
+    (53, RARE, 14, 3),        // Seraphowl
+    (54, RARE, 12, 2),        // Auridillo
+    (55, RARE, 15, 3),        // Verdantiger
+    (56, RARE, 11, 2),        // Cryoweb
+    (57, RARE, 14, 3),        // Heliofish
+    (58, RARE, 12, 2),        // Ferrokit
+    (59, RARE, 15, 3),        // Aetherhound
+    (60, RARE, 11, 2),        // Magnetoise
+    (61, RARE, 14, 3),        // Thornmunk
+    (62, RARE, 12, 2),        // Prismaconda
+    (63, RARE, 15, 3),        // Wyrmhawk
+    (64, RARE, 11, 2),        // Stormbison
+    (65, RARE, 14, 3),        // Solartaur
+    (66, RARE, 12, 2),        // Aquashrew
+    (67, RARE, 15, 3),        // Gustram
+    (68, RARE, 11, 2),        // Chronocat
+    (69, RARE, 14, 3),        // Spikoon
+    (70, RARE, 12, 2),        // Prismoth
+    (71, RARE, 15, 3),        // Froststag
+    (72, UNCOMMON, 8, 2),     // Fluffleaf
+    (73, UNCOMMON, 10, 2),    // Barkbat
+    (74, UNCOMMON, 6, 1),     // Lichenmoose
+    (75, UNCOMMON, 9, 2),     // Thornpup
+    (76, UNCOMMON, 7, 1),     // Bloomlemur
+    (77, UNCOMMON, 10, 2),    // Cryopus
+    (78, UNCOMMON, 6, 1),     // Auroraccoon
+    (79, UNCOMMON, 9, 2),     // Skinkflare
+    (80, UNCOMMON, 7, 1),     // Buzzlebee
+    (81, UNCOMMON, 10, 2),    // Camoskunk
+    (82, UNCOMMON, 6, 1),     // Sparklion
+    (83, UNCOMMON, 9, 2),     // Petalhog
+    (84, UNCOMMON, 7, 1),     // Dewturtle
+    (85, UNCOMMON, 10, 2),    // Frostbunny
+    (86, UNCOMMON, 6, 1),     // Prismfly
+    (87, UNCOMMON, 9, 2),     // Emberat
+    (88, UNCOMMON, 7, 1),     // Mosskitty
+    (89, UNCOMMON, 10, 2),    // Bloomink
+    (90, UNCOMMON, 6, 1),     // Scorchpig
+    (91, UNCOMMON, 9, 2),     // Sapossum
+    (92, UNCOMMON, 7, 1),     // Cindercrow
+    (93, UNCOMMON, 10, 2),    // Glowlure
+    (94, UNCOMMON, 6, 1),     // Breezewren
+    (95, UNCOMMON, 9, 2),     // Nutglow
+    (96, UNCOMMON, 7, 1),     // Mistcub
+    (97, UNCOMMON, 10, 2),    // Flarepup
+    (98, UNCOMMON, 6, 1),     // Petalparrot
+    (99, UNCOMMON, 9, 2),     // Aquarump
+    (100, UNCOMMON, 7, 1),    // Lumisal
+    (101, UNCOMMON, 10, 2),   // Sporestoat
+    (102, UNCOMMON, 6, 1),    // Clinkfly
+    (103, UNCOMMON, 9, 2),    // Dunesnail
+    (104, UNCOMMON, 7, 1),    // Pearlcrab
+    (105, UNCOMMON, 10, 2),   // Floracow
+    (106, UNCOMMON, 6, 1),    // Emberloach
+    (107, UNCOMMON, 9, 2),    // Circuitpup
+    (108, UNCOMMON, 7, 1),    // Galestrich
+    (109, UNCOMMON, 10, 2),   // Frostowl
+    (110, UNCOMMON, 6, 1),    // Emberfin
+    (111, UNCOMMON, 9, 2),    // Sparkmouse
+    (112, UNCOMMON, 7, 1),    // Mossmoth
+    (113, UNCOMMON, 10, 2),   // Orbitpup
+    (114, UNCOMMON, 6, 1),    // Petalfawn
+    (115, UNCOMMON, 9, 2),    // Stoneling
+    (116, UNCOMMON, 7, 1),    // Glimmerfly
+    (117, UNCOMMON, 10, 2),   // Gustbloom
+    (118, UNCOMMON, 6, 1),    // Mossgator
+    (119, UNCOMMON, 9, 2),    // Voltcobra
+    (120, UNCOMMON, 7, 1),    // Lumiquill
+    (121, UNCOMMON, 10, 2),   // CrystalFinch
+    (122, UNCOMMON, 6, 1),    // Steamster
+    (123, UNCOMMON, 9, 2),    // Fungipede
+    (124, UNCOMMON, 7, 1),    // Petalcoat
+    (125, UNCOMMON, 10, 2),   // Zephyrlark
+    (126, UNCOMMON, 6, 1),    // Terrabunny
+    (127, UNCOMMON, 9, 2),    // Starpup
+    (128, UNCOMMON, 7, 1),    // Barkrat
+    (129, UNCOMMON, 10, 2),   // Dewfawn
+    (130, UNCOMMON, 6, 1),    // Suncurl
+    (131, UNCOMMON, 9, 2),    // Sporehog
+    (132, COMMON, 3, 1),      // Puffbird
+    (133, COMMON, 5, 1),      // Pebbletoad
+    (134, COMMON, 1, 1),      // Flutterfish
+    (135, COMMON, 4, 1),      // Puddlehopper
+    (136, COMMON, 2, 1),      // Bouncecrab
+    (137, COMMON, 5, 1),      // Snugslug
+    (138, COMMON, 1, 1),      // Wiggleworm
+    (139, COMMON, 4, 1),      // Bubbletoad
+    (140, COMMON, 2, 1),      // Nestbunny
+    (141, COMMON, 5, 1),      // Dappleduck
+    (142, COMMON, 1, 1),      // Pipsqueak
+    (143, COMMON, 4, 1),      // Softsparrow
+    (144, COMMON, 2, 1),      // Fluffcalf
+    (145, COMMON, 5, 1),      // Whispermouse
+    (146, COMMON, 1, 1),      // Bubblebat
+    (147, COMMON, 4, 1),      // Sunnyotter
+    (148, COMMON, 2, 1),      // Gustkoala
+    (149, COMMON, 5, 1),      // Petalcrow
+    (150, COMMON, 1, 1),      // Shimmerseal
+    (151, COMMON, 4, 1),      // Sparkchick
+    (152, COMMON, 2, 1),      // Fuzzfly
+    (153, COMMON, 5, 1),      // Dewbeetle
+    (154, COMMON, 1, 1),      // Glitterguppy
+    (155, COMMON, 4, 1),      // Chirpfinch
+    (156, COMMON, 2, 1),      // Toasturtle
+    (157, COMMON, 5, 1),      // Pillowcub
+    (158, COMMON, 1, 1),      // Leafrat
+    (159, COMMON, 4, 1),      // Shiftsnake
+    (160, COMMON, 2, 1),      // Puddlepig
+    (161, COMMON, 5, 1),      // Coldbird
+    (162, COMMON, 1, 1),      // Sunmoth
+    (163, COMMON, 4, 1),      // Snugglepig
+    (164, COMMON, 2, 1),      // Puddleclaw
+    (165, COMMON, 5, 1),      // Berrybear
+    (166, COMMON, 1, 1),      // Murmurfin
+    (167, COMMON, 4, 1),      // Sproutmouse
+    (168, COMMON, 2, 1),      // Softspider
+    (169, COMMON, 5, 1),      // Petalpup
+    (170, COMMON, 1, 1),      // Thawhare
+    (171, COMMON, 4, 1),      // Dewdragonfly
+    (172, COMMON, 2, 1),      // Galaxpup
+    (173, COMMON, 5, 1),      // Drizzledove
+    (174, COMMON, 1, 1),      // Twigrobin
+    (175, COMMON, 4, 1),      // Flitterfrog
+    (176, COMMON, 2, 1),      // Marshmink
+    (177, COMMON, 5, 1),      // Pebblepup
+    (178, COMMON, 1, 1),      // Tintaduck
+    (179, COMMON, 4, 1),      // Glowhare
+    (180, COMMON, 2, 1),      // Stargrass
+    (181, COMMON, 5, 1),      // Gloamturtle
+    (182, COMMON, 1, 1),      // Flickerfox
+    (183, COMMON, 4, 1),      // Lullabear
+    (184, COMMON, 2, 1),      // Sablechick
+    (185, COMMON, 5, 1),      // Crispig
+    (186, COMMON, 1, 1),      // Wispwren
+    (187, COMMON, 4, 1),      // Murmurmink
+    (188, COMMON, 2, 1),      // Velvetowl
+    (189, COMMON, 5, 1),      // Dreamrat
+    (190, COMMON, 1, 1),      // Cloudkit
+    (191, COMMON, 4, 1),      // Pebblepup (duplicate of 177)
 ];
+
+// Helper function to get card data by ID
+pub fn get_card_by_id(id: u16) -> Option<(u8, u16, u8)> {
+    CARD_DATA
+        .iter()
+        .find(|(card_id, _, _, _)| *card_id == id)
+        .map(|(_, rarity, power, berry_consumption)| (*rarity, *power, *berry_consumption))
+}

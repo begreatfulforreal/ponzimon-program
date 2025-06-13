@@ -39,6 +39,94 @@ pub struct BoosterOpened {
     pub card_types: [u8; 5],
 }
 
+/// Helper functions for working with fixed-size arrays
+impl Player {
+    pub fn add_card(&mut self, card: Card) -> Result<()> {
+        require!(
+            (self.card_count as usize) < MAX_CARDS_PER_PLAYER as usize,
+            PonzimonError::MachineCapacityExceeded
+        );
+        self.cards[self.card_count as usize] = Some(card);
+        self.card_count += 1;
+        Ok(())
+    }
+
+    pub fn remove_card(&mut self, index: u8) -> Result<()> {
+        let index_usize = index as usize;
+        require!(
+            index_usize < (self.card_count as usize),
+            PonzimonError::CardIndexOutOfBounds
+        );
+
+        // Shift all cards after the removed card to fill the gap
+        for i in index_usize..(self.card_count as usize - 1) {
+            self.cards[i] = self.cards[i + 1].clone();
+        }
+
+        // Clear the last slot
+        self.cards[(self.card_count - 1) as usize] = None;
+        self.card_count -= 1;
+
+        // Update staked indices - shift down any indices that were after the removed card
+        for i in 0..(self.staked_count as usize) {
+            if self.staked_indices[i] > index {
+                self.staked_indices[i] -= 1;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn add_staked_index(&mut self, index: u8) -> Result<()> {
+        require!(
+            (self.staked_count as usize) < MAX_STAKED_CARDS_PER_PLAYER as usize,
+            PonzimonError::MachineCapacityExceeded
+        );
+
+        // Check if already staked
+        for i in 0..(self.staked_count as usize) {
+            require!(self.staked_indices[i] != index, PonzimonError::CardIsStaked);
+        }
+
+        self.staked_indices[self.staked_count as usize] = index;
+        self.staked_count += 1;
+        Ok(())
+    }
+
+    pub fn remove_staked_index(&mut self, index: u8) -> Result<()> {
+        let mut found_index = None;
+
+        // Find the index in staked_indices
+        for i in 0..(self.staked_count as usize) {
+            if self.staked_indices[i] == index {
+                found_index = Some(i);
+                break;
+            }
+        }
+
+        require!(found_index.is_some(), PonzimonError::CardNotStaked);
+
+        let found_i = found_index.unwrap();
+
+        // Shift remaining staked indices to fill the gap
+        for i in found_i..(self.staked_count as usize - 1) {
+            self.staked_indices[i] = self.staked_indices[i + 1];
+        }
+
+        self.staked_count -= 1;
+        Ok(())
+    }
+
+    pub fn is_card_staked(&self, index: u8) -> bool {
+        for i in 0..(self.staked_count as usize) {
+            if self.staked_indices[i] == index {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// ────────────────────────────────────────────────────────────────────────────
 /// INTERNAL: update the global accumulator
 /// ────────────────────────────────────────────────────────────────────────────
@@ -91,7 +179,7 @@ fn update_pool(gs: &mut GlobalState, slot_now: u64) {
 /// Helper to settle and mint rewards for a player.
 /// Returns Ok(amount_claimed) or Ok(0) if nothing to claim.
 fn settle_and_mint_rewards<'info>(
-    player: &mut Account<'info, Player>,
+    player: &mut Box<Account<'info, Player>>,
     gs: &mut Account<'info, GlobalState>,
     now: u64,
     player_token_account: &AccountInfo<'info>,
@@ -276,7 +364,6 @@ pub fn initialize_program(
 
     gs.total_berries = 0;
 
-
     Ok(())
 }
 
@@ -294,8 +381,10 @@ pub struct PurchaseInitialFarm<'info> {
         space = 8      // discriminator
             + 32       // owner
             + 10       // farm
-            + 4 + (50 * 17)// cards vec: MAX_CARDS (50) * size_of(Card)
-            + 4 + 50   // staked_indices vec: u8
+            + (MAX_CARDS_PER_PLAYER as usize * (1 + 17)) // cards: [Option<Card>; MAX_CARDS_PER_PLAYER] - Option<Card> = 1 + 17 bytes
+            + 1        // card_count: u8
+            + MAX_STAKED_CARDS_PER_PLAYER as usize       // staked_indices: [u8; MAX_STAKED_CARDS_PER_PLAYER]
+            + 1        // staked_count: u8
             + 8        // berries
             + 33       // referrer
             + 16       // last_acc_tokens_per_berry
@@ -313,7 +402,7 @@ pub struct PurchaseInitialFarm<'info> {
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(
         mut,
         seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
@@ -395,36 +484,33 @@ pub fn purchase_initial_farm(
     // player bootstrap
     player.owner = ctx.accounts.player_wallet.key();
     player.farm = Farm {
-        farm_type: 0,       // Starter Hut
-        total_cards: 3,     // Can hold 3 cards initially
-        berry_capacity: 15, // 15 berry capacity
+        farm_type: 1,       // Level 1 farm from farmList
+        total_cards: 2,     // From farmList[1].slotQuantity
+        berry_capacity: 15, // From farmList[1].berryAvailable
     };
 
-    // Give player 3 starter cards
-    let starter_cards = vec![
-        Card {
-            card_type: COMMON_CARD,
-            card_power: 100,
-            berry_consumption: 3,
-        },
-        Card {
-            card_type: COMMON_CARD,
-            card_power: 100,
-            berry_consumption: 3,
-        },
-        Card {
-            card_type: UNCOMMON_CARD,
-            card_power: 250,
-            berry_consumption: 5,
-        },
-    ];
+    // Initialize arrays
+    player.cards = [None; MAX_CARDS_PER_PLAYER as usize];
+    player.card_count = 0;
+    player.staked_indices = [0; MAX_STAKED_CARDS_PER_PLAYER as usize];
+    player.staked_count = 0;
 
-    let total_berry_consumption = starter_cards
-        .iter()
-        .map(|c| c.berry_consumption)
-        .sum::<u64>();
-    player.cards = starter_cards;
-    player.staked_indices = vec![0, 1, 2];
+    // Give player 3 starter cards using the IDs from data.ts
+    let mut total_berry_consumption = 0u64;
+    for (i, &card_id) in STARTER_CARD_IDS.iter().enumerate() {
+        if let Some((rarity, power, berry_consumption)) = get_card_by_id(card_id) {
+            let card = Card {
+                id: card_id,
+                rarity,
+                power,
+                berry_consumption,
+            };
+            player.add_card(card)?;
+            player.add_staked_index(i as u8)?;
+            total_berry_consumption += berry_consumption as u64;
+        }
+    }
+
     player.berries = total_berry_consumption; // Total berry consumption
     player.referrer = referrer;
     player.last_claim_slot = slot;
@@ -453,7 +539,7 @@ pub fn purchase_initial_farm(
         player_account: player.key(),
         referrer,
         farm_type: player.farm.farm_type,
-        initial_cards: player.cards.len() as u8,
+        initial_cards: player.card_count,
         initial_hashpower: player.berries,
         slot,
     });
@@ -475,7 +561,7 @@ pub struct DiscardCard<'info> {
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(
         mut,
         seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
@@ -507,11 +593,11 @@ pub fn discard_card(ctx: Context<DiscardCard>, card_index: u8) -> Result<()> {
     require!(gs.production_enabled, PonzimonError::ProductionDisabled);
 
     // Security: Validate card index bounds
-    validate_card_index(card_index, player.cards.len())?;
+    validate_card_index(card_index, player.card_count as usize)?;
 
     // Ensure the card is not currently staked
     require!(
-        !player.staked_indices.contains(&card_index),
+        !player.is_card_staked(card_index),
         PonzimonError::CardIsStaked
     );
 
@@ -527,15 +613,8 @@ pub fn discard_card(ctx: Context<DiscardCard>, card_index: u8) -> Result<()> {
         ctx.bumps.global_state,
     )?;
 
-    // Remove the card
-    player.cards.remove(card_index as usize);
-
-    // Adjust the indices of any staked cards that came after the removed card
-    player.staked_indices.iter_mut().for_each(|idx| {
-        if *idx > card_index {
-            *idx -= 1;
-        }
-    });
+    // Remove the card using the helper function
+    player.remove_card(card_index)?;
 
     player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
 
@@ -561,7 +640,7 @@ pub struct StakeCard<'info> {
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(
         mut,
         seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
@@ -584,18 +663,21 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
     player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
 
     // Security: Validate card index bounds
-    validate_card_index(card_index, player.cards.len())?;
+    validate_card_index(card_index, player.card_count as usize)?;
 
     require!(
-        !player.staked_indices.contains(&card_index),
+        !player.is_card_staked(card_index),
         PonzimonError::CardIsStaked // Using for "already staked"
     );
     require!(
-        player.staked_indices.len() < player.farm.total_cards as usize,
+        (player.staked_count as usize) < player.farm.total_cards as usize,
         PonzimonError::MachineCapacityExceeded
     );
 
-    let card_berry_consumption = player.cards[card_index as usize].berry_consumption;
+    let card = player.cards[card_index as usize]
+        .as_ref()
+        .ok_or(PonzimonError::CardIndexOutOfBounds)?;
+    let card_berry_consumption = card.berry_consumption as u64;
 
     // Security: Use safe arithmetic for berry calculations
     let new_player_berries = safe_add_berries(player.berries, card_berry_consumption)?;
@@ -607,7 +689,7 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
     );
 
     // Effects
-    player.staked_indices.push(card_index);
+    player.add_staked_index(card_index)?;
     player.berries = new_player_berries;
     gs.total_berries = new_total_berries;
 
@@ -633,7 +715,7 @@ pub struct UnstakeCard<'info> {
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(
         mut,
         seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
@@ -656,21 +738,24 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
     player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
 
     // Security: Validate card index bounds
-    validate_card_index(card_index, player.cards.len())?;
+    validate_card_index(card_index, player.card_count as usize)?;
 
     require!(
-        player.staked_indices.contains(&card_index),
+        player.is_card_staked(card_index),
         PonzimonError::CardNotStaked
     );
 
-    let card_berry_consumption = player.cards[card_index as usize].berry_consumption;
+    let card = player.cards[card_index as usize]
+        .as_ref()
+        .ok_or(PonzimonError::CardIndexOutOfBounds)?;
+    let card_berry_consumption = card.berry_consumption as u64;
 
     // Security: Use safe arithmetic for berry calculations
     let new_player_berries = safe_sub_berries(player.berries, card_berry_consumption)?;
     let new_total_berries = safe_sub_berries(gs.total_berries, card_berry_consumption)?;
 
     // Effects
-    player.staked_indices.retain(|&idx| idx != card_index);
+    player.remove_staked_index(card_index)?;
     player.berries = new_player_berries;
     gs.total_berries = new_total_berries;
 
@@ -694,11 +779,11 @@ pub struct UpgradeFarm<'info> {
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         constraint = farm_type > player.farm.farm_type @ PonzimonError::InvalidFarmType,
-        constraint = farm_type <= MASTER_ARENA @ PonzimonError::InvalidFarmType,
+        constraint = farm_type <= MAX_FARM_TYPE @ PonzimonError::InvalidFarmType,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(
         mut,
         seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
@@ -726,7 +811,7 @@ pub fn upgrade_farm(ctx: Context<UpgradeFarm>, farm_type: u8) -> Result<()> {
     // Security: Validate farm type bounds
     validate_farm_type(farm_type)?;
     require!(
-        (COZY_CABIN..=MASTER_ARENA).contains(&farm_type),
+        farm_type >= 2 && farm_type <= MAX_FARM_TYPE,
         PonzimonError::InvalidFarmType
     );
 
@@ -821,7 +906,7 @@ pub struct ClaimRewards<'info> {
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(
         mut,
         seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
@@ -886,7 +971,7 @@ pub struct RequestOpenBooster<'info> {
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(
         mut,
         seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
@@ -923,7 +1008,7 @@ pub fn request_open_booster(
     // Guards
     require!(gs.production_enabled, PonzimonError::ProductionDisabled);
     require!(
-        player.cards.len() + 5 <= 50, // MAX_CARDS
+        (player.card_count as usize) + 5 <= MAX_CARDS_PER_PLAYER as usize,
         PonzimonError::MachineCapacityExceeded
     );
 
@@ -1001,7 +1086,7 @@ pub struct SettleOpenBooster<'info> {
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(
         mut,
         seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
@@ -1038,7 +1123,7 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
     update_pool(gs, clock.slot);
     player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
 
-    let mut card_types = [0u8; 5];
+    let mut card_ids = [0u16; 5];
     for i in 0..5 {
         // Use a different slice of the random value for each card
         let slice_start = i * 4;
@@ -1049,33 +1134,39 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
 
         let random_percent = random_u32 % 100;
 
-        let card_type = match random_percent {
-            0..=49 => COMMON_CARD,      // 50%
-            50..=74 => UNCOMMON_CARD,   // 25%
-            75..=89 => RARE_CARD,       // 15%
-            90..=95 => HOLO_RARE_CARD,  // 6%
-            96..=98 => ULTRA_RARE_CARD, // 3%
-            _ => SECRET_RARE_CARD,      // 1%
+        let rarity = match random_percent {
+            0..=49 => COMMON,       // 50%
+            50..=74 => UNCOMMON,    // 25%
+            75..=89 => RARE,        // 15%
+            90..=95 => DOUBLE_RARE, // 6%
+            96..=98 => VERY_RARE,   // 3%
+            _ => SUPER_RARE,        // 1%
         };
-        card_types[i] = card_type;
 
-        // Security: Validate card_type is within bounds
-        require!(
-            (card_type as usize) < CARD_CONFIGS.len(),
-            PonzimonError::InvalidMachineType
-        );
-        require!(
-            player.cards.len() < MAX_CARDS_PER_PLAYER as usize,
-            PonzimonError::MachineCapacityExceeded
-        );
+        // Find a random card of the determined rarity
+        let cards_of_rarity: Vec<&(u16, u8, u16, u8)> = CARD_DATA
+            .iter()
+            .filter(|(_, card_rarity, _, _)| *card_rarity == rarity)
+            .collect();
 
-        let (card_power, berry_consumption, _) = CARD_CONFIGS[card_type as usize];
-        let new_card = Card {
-            card_type,
-            card_power,
-            berry_consumption,
-        };
-        player.cards.push(new_card);
+        if !cards_of_rarity.is_empty() {
+            let card_index = (random_u32 as usize) % cards_of_rarity.len();
+            let (card_id, _, power, berry_consumption) = cards_of_rarity[card_index];
+
+            require!(
+                (player.card_count as usize) < MAX_CARDS_PER_PLAYER as usize,
+                PonzimonError::MachineCapacityExceeded
+            );
+
+            let new_card = Card {
+                id: *card_id,
+                rarity,
+                power: *power,
+                berry_consumption: *berry_consumption,
+            };
+            player.add_card(new_card)?;
+            card_ids[i] = *card_id;
+        }
     }
 
     // Reset booster state
@@ -1085,7 +1176,7 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
 
     emit!(BoosterOpened {
         player: player.key(),
-        card_types,
+        card_types: card_ids.map(|id| id as u8), // Convert to u8 for compatibility with event size limits
     });
 
     Ok(())
@@ -1194,7 +1285,7 @@ pub struct ResetPlayer<'info> {
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     pub token_mint: Account<'info, Mint>,
     /// CHECK: This is just a system account
     pub player_wallet: AccountInfo<'info>,
@@ -1214,12 +1305,14 @@ pub fn reset_player(ctx: Context<ResetPlayer>) -> Result<()> {
     // Reset player's berry consumption and farm
     player.berries = 0;
     player.farm = Farm {
-        farm_type: 0,
-        total_cards: 3,
+        farm_type: 1,
+        total_cards: 2,
         berry_capacity: 15,
     };
-    player.cards = vec![]; // Clear all cards
-    player.staked_indices = vec![];
+    player.cards = [None; MAX_CARDS_PER_PLAYER as usize]; // Clear all cards
+    player.card_count = 0;
+    player.staked_indices = [0; MAX_STAKED_CARDS_PER_PLAYER as usize];
+    player.staked_count = 0;
 
     // Update global berry consumption
     gs.total_berries = gs.total_berries.saturating_sub(old_berries);
@@ -1242,7 +1335,7 @@ pub struct GambleCommit<'info> {
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(
         mut,
         seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
@@ -1351,7 +1444,7 @@ pub struct GambleSettle<'info> {
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
-    pub player: Account<'info, Player>,
+    pub player: Box<Account<'info, Player>>,
     #[account(
         mut,
         seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
