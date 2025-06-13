@@ -74,4 +74,18 @@ pub enum PonzimonError {
     BoosterAlreadyPending,
     #[msg("Player does not have a pending booster pack to settle.")]
     NoBoosterPending,
+
+    // Security-related error variants
+    #[msg("Minimum delay not met for randomness commitment")]
+    RandomnessDelayNotMet,
+    #[msg("Invalid token account owner")]
+    InvalidTokenAccountOwner,
+    #[msg("Arithmetic overflow in berry calculation")]
+    ArithmeticOverflow,
+    #[msg("Card index out of bounds")]
+    CardIndexOutOfBounds,
+    #[msg("Invalid farm type for operation")]
+    InvalidFarmTypeForOperation,
+    #[msg("Program does not have mint authority over the token")]
+    InvalidMintAuthority,
 }

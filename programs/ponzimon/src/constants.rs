@@ -4,6 +4,11 @@ pub const PLAYER_SEED: &[u8] = b"player";
 // Fixed variables
 pub const ACC_SCALE: u128 = 1_000_000_000_000; // 1e12
 
+// Security constants
+pub const MIN_RANDOMNESS_DELAY_SLOTS: u64 = 3; // Minimum slots between commit and settle
+pub const MAX_CARDS_PER_PLAYER: u8 = 50; // Maximum cards a player can have
+pub const MAX_FARM_TYPE: u8 = 9; // Maximum valid farm type (MASTER_ARENA)
+
 // Farm Types (10 farms now)
 pub const STARTER_HUT: u8 = 0;
 pub const COZY_CABIN: u8 = 1;

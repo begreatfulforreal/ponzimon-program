@@ -231,6 +231,9 @@ pub struct InitializeProgram<'info> {
         associated_token::authority = fees_wallet,
     )]
     pub fees_token_account: Account<'info, TokenAccount>,
+    #[account(
+        constraint = token_mint.mint_authority.unwrap() == global_state.key() @ PonzimonError::InvalidMintAuthority
+    )]
     pub token_mint: Account<'info, Mint>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -272,6 +275,7 @@ pub fn initialize_program(
     gs.dust_threshold_divisor = 1000; // Default to 0.1%
 
     gs.total_berries = 0;
+
 
     Ok(())
 }
@@ -480,7 +484,8 @@ pub struct DiscardCard<'info> {
     pub global_state: Account<'info, GlobalState>,
     #[account(
         mut,
-        constraint = player_token_account.mint == global_state.token_mint
+        constraint = player_token_account.mint == global_state.token_mint,
+        constraint = player_token_account.owner == player_wallet.key() @ PonzimonError::InvalidTokenAccountOwner
     )]
     pub player_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
@@ -501,10 +506,8 @@ pub fn discard_card(ctx: Context<DiscardCard>, card_index: u8) -> Result<()> {
 
     require!(gs.production_enabled, PonzimonError::ProductionDisabled);
 
-    require!(
-        (card_index as usize) < player.cards.len(),
-        PonzimonError::InvalidMachineType // TODO: Change to InvalidCardIndex
-    );
+    // Security: Validate card index bounds
+    validate_card_index(card_index, player.cards.len())?;
 
     // Ensure the card is not currently staked
     require!(
@@ -580,11 +583,9 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
     update_pool(gs, slot);
     player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
 
-    // Validations
-    require!(
-        (card_index as usize) < player.cards.len(),
-        PonzimonError::InvalidMachineType // TODO: Change to InvalidCardIndex
-    );
+    // Security: Validate card index bounds
+    validate_card_index(card_index, player.cards.len())?;
+
     require!(
         !player.staked_indices.contains(&card_index),
         PonzimonError::CardIsStaked // Using for "already staked"
@@ -595,15 +596,20 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
     );
 
     let card_berry_consumption = player.cards[card_index as usize].berry_consumption;
+
+    // Security: Use safe arithmetic for berry calculations
+    let new_player_berries = safe_add_berries(player.berries, card_berry_consumption)?;
+    let new_total_berries = safe_add_berries(gs.total_berries, card_berry_consumption)?;
+
     require!(
-        player.berries + card_berry_consumption <= player.farm.berry_capacity,
+        new_player_berries <= player.farm.berry_capacity,
         PonzimonError::PowerCapacityExceeded
     );
 
     // Effects
     player.staked_indices.push(card_index);
-    player.berries += card_berry_consumption;
-    gs.total_berries += card_berry_consumption;
+    player.berries = new_player_berries;
+    gs.total_berries = new_total_berries;
 
     emit!(CardStaked {
         player: player.key(),
@@ -649,11 +655,9 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
     update_pool(gs, slot);
     player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
 
-    // Validations
-    require!(
-        (card_index as usize) < player.cards.len(),
-        PonzimonError::InvalidMachineType // TODO: Change to InvalidCardIndex
-    );
+    // Security: Validate card index bounds
+    validate_card_index(card_index, player.cards.len())?;
+
     require!(
         player.staked_indices.contains(&card_index),
         PonzimonError::CardNotStaked
@@ -661,10 +665,14 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
 
     let card_berry_consumption = player.cards[card_index as usize].berry_consumption;
 
+    // Security: Use safe arithmetic for berry calculations
+    let new_player_berries = safe_sub_berries(player.berries, card_berry_consumption)?;
+    let new_total_berries = safe_sub_berries(gs.total_berries, card_berry_consumption)?;
+
     // Effects
     player.staked_indices.retain(|&idx| idx != card_index);
-    player.berries -= card_berry_consumption;
-    gs.total_berries -= card_berry_consumption;
+    player.berries = new_player_berries;
+    gs.total_berries = new_total_berries;
 
     emit!(CardUnstaked {
         player: player.key(),
@@ -699,7 +707,8 @@ pub struct UpgradeFarm<'info> {
     pub global_state: Account<'info, GlobalState>,
     #[account(
         mut,
-        constraint = player_token_account.mint == global_state.token_mint
+        constraint = player_token_account.mint == global_state.token_mint,
+        constraint = player_token_account.owner == player_wallet.key() @ PonzimonError::InvalidTokenAccountOwner
     )]
     pub player_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
@@ -714,6 +723,8 @@ pub struct UpgradeFarm<'info> {
 }
 
 pub fn upgrade_farm(ctx: Context<UpgradeFarm>, farm_type: u8) -> Result<()> {
+    // Security: Validate farm type bounds
+    validate_farm_type(farm_type)?;
     require!(
         (COZY_CABIN..=MASTER_ARENA).contains(&farm_type),
         PonzimonError::InvalidFarmType
@@ -884,7 +895,8 @@ pub struct RequestOpenBooster<'info> {
     pub global_state: Account<'info, GlobalState>,
     #[account(
         mut,
-        constraint = player_token_account.mint == global_state.token_mint
+        constraint = player_token_account.mint == global_state.token_mint,
+        constraint = player_token_account.owner == player_wallet.key() @ PonzimonError::InvalidTokenAccountOwner
     )]
     pub player_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
@@ -1006,6 +1018,9 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
 
+    // Security: Validate minimum delay for randomness
+    validate_randomness_delay(player.booster_commit_slot, clock.slot)?;
+
     // Verify the randomness account
     if ctx.accounts.randomness_account_data.key() != player.booster_randomness_account {
         return Err(PonzimonError::InvalidRandomnessAccount.into());
@@ -1043,6 +1058,16 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
             _ => SECRET_RARE_CARD,      // 1%
         };
         card_types[i] = card_type;
+
+        // Security: Validate card_type is within bounds
+        require!(
+            (card_type as usize) < CARD_CONFIGS.len(),
+            PonzimonError::InvalidMachineType
+        );
+        require!(
+            player.cards.len() < MAX_CARDS_PER_PLAYER as usize,
+            PonzimonError::MachineCapacityExceeded
+        );
 
         let (card_power, berry_consumption, _) = CARD_CONFIGS[card_type as usize];
         let new_card = Card {
@@ -1350,6 +1375,9 @@ pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
     let clock: Clock = Clock::get()?;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
+
+    // Security: Validate minimum delay for randomness
+    validate_randomness_delay(player.commit_slot, clock.slot)?;
 
     // Verify that the provided randomness account matches the stored one
     if ctx.accounts.randomness_account_data.key() != player.randomness_account {
