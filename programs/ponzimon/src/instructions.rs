@@ -39,6 +39,14 @@ pub struct BoosterOpened {
     pub card_types: [u8; 5],
 }
 
+#[event]
+pub struct CardsRecycled {
+    pub player: Pubkey,
+    pub recycled_cards: [u8; 10], // Card indices that were recycled
+    pub success: bool,            // Whether recycling was successful (20% chance)
+    pub new_card_id: Option<u16>, // ID of new card if successful
+}
+
 /// Helper functions for working with fixed-size arrays
 impl Player {
     pub fn add_card(&mut self, card: Card) -> Result<()> {
@@ -398,7 +406,11 @@ pub struct PurchaseInitialFarm<'info> {
             + 1        // has_pending_gamble
             + 1        // has_pending_booster
             + 32       // booster_randomness_account
-            + 8,       // booster_commit_slot
+            + 8        // booster_commit_slot
+            + 1        // has_pending_recycle
+            + 32       // recycle_randomness_account
+            + 8        // recycle_commit_slot
+            + 10,      // recycle_card_indices [u8; 10]
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -454,7 +466,7 @@ pub fn purchase_initial_farm(
 
     require!(gs.production_enabled, PonzimonError::ProductionDisabled);
     require!(
-        player.cards.is_empty(),
+        player.card_count == 0,
         PonzimonError::InitialFarmAlreadyPurchased
     );
 
@@ -530,6 +542,12 @@ pub fn purchase_initial_farm(
     player.has_pending_booster = false;
     player.booster_randomness_account = Pubkey::default();
     player.booster_commit_slot = 0;
+
+    // Initialize recycle fields
+    player.has_pending_recycle = false;
+    player.recycle_randomness_account = Pubkey::default();
+    player.recycle_commit_slot = 0;
+    player.recycle_card_indices = [0; 10];
 
     // global stats (Effect)
     gs.total_berries += total_berry_consumption;
@@ -1321,6 +1339,19 @@ pub fn reset_player(ctx: Context<ResetPlayer>) -> Result<()> {
     player.last_claim_slot = slot;
     player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
 
+    // Reset any pending operations
+    player.has_pending_gamble = false;
+    player.has_pending_booster = false;
+    player.has_pending_recycle = false;
+    player.randomness_account = Pubkey::default();
+    player.booster_randomness_account = Pubkey::default();
+    player.recycle_randomness_account = Pubkey::default();
+    player.commit_slot = 0;
+    player.booster_commit_slot = 0;
+    player.recycle_commit_slot = 0;
+    player.current_gamble_amount = 0;
+    player.recycle_card_indices = [0; 10];
+
     Ok(())
 }
 
@@ -1532,6 +1563,219 @@ pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
     player.current_gamble_amount = 0;
     player.randomness_account = Pubkey::default();
     player.commit_slot = 0;
+
+    Ok(())
+}
+
+/// RECYCLE CARDS (Secure two-step)
+
+#[derive(Accounts)]
+pub struct RecycleCardsCommit<'info> {
+    #[account(mut)]
+    pub player_wallet: Signer<'info>,
+    #[account(
+        mut,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
+        constraint = !player.has_pending_recycle @ PonzimonError::RecycleAlreadyPending,
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        bump
+    )]
+    pub player: Box<Account<'info, Player>>,
+    #[account(
+        mut,
+        seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub global_state: Account<'info, GlobalState>,
+    pub token_mint: Account<'info, Mint>,
+    /// CHECK: The account's data is validated manually within the handler.
+    pub randomness_account_data: AccountInfo<'info>,
+}
+
+pub fn recycle_cards_commit(
+    ctx: Context<RecycleCardsCommit>,
+    randomness_account: Pubkey,
+    card_indices: [u8; 10],
+) -> Result<()> {
+    let slot = Clock::get()?.slot;
+    let player = &mut ctx.accounts.player;
+    let gs = &mut ctx.accounts.global_state;
+
+    // Guards
+    require!(gs.production_enabled, PonzimonError::ProductionDisabled);
+    require!(
+        player.card_count >= 10,
+        PonzimonError::InvalidRecycleCardCount
+    );
+
+    // Validate card indices: must be unique, valid, and not staked
+    let mut sorted_indices = card_indices.clone();
+    sorted_indices.sort();
+
+    // Check for duplicates
+    for i in 1..sorted_indices.len() {
+        require!(
+            sorted_indices[i] != sorted_indices[i - 1],
+            PonzimonError::DuplicateRecycleCardIndices
+        );
+    }
+
+    // Validate each card index
+    for &index in &card_indices {
+        validate_card_index(index, player.card_count as usize)?;
+        require!(!player.is_card_staked(index), PonzimonError::CardIsStaked);
+    }
+
+    // Validate Switchboard randomness account
+    let randomness_data =
+        RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
+    if randomness_data.seed_slot != slot - 1 {
+        return Err(PonzimonError::RandomnessAlreadyRevealed.into());
+    }
+
+    // Store the card indices and set pending state
+    player.recycle_card_indices = card_indices;
+    player.has_pending_recycle = true;
+    player.recycle_commit_slot = randomness_data.seed_slot;
+    player.recycle_randomness_account = randomness_account;
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct RecycleCardsSettle<'info> {
+    #[account(mut)]
+    pub player_wallet: Signer<'info>,
+    #[account(
+        mut,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
+        constraint = player.has_pending_recycle @ PonzimonError::NoRecyclePending,
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        bump
+    )]
+    pub player: Box<Account<'info, Player>>,
+    #[account(
+        mut,
+        seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub global_state: Account<'info, GlobalState>,
+    pub token_mint: Account<'info, Mint>,
+    /// CHECK: The account's data is validated manually within the handler.
+    pub randomness_account_data: AccountInfo<'info>,
+}
+
+pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
+    let clock: Clock = Clock::get()?;
+    let player = &mut ctx.accounts.player;
+    let gs = &mut ctx.accounts.global_state;
+
+    // Security: Validate minimum delay for randomness
+    validate_randomness_delay(player.recycle_commit_slot, clock.slot)?;
+
+    // Verify the randomness account
+    if ctx.accounts.randomness_account_data.key() != player.recycle_randomness_account {
+        return Err(PonzimonError::InvalidRandomnessAccount.into());
+    }
+    let randomness_data =
+        RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
+    if randomness_data.seed_slot != player.recycle_commit_slot {
+        return Err(PonzimonError::RandomnessExpired.into());
+    }
+    let random_value = randomness_data
+        .get_value(&clock)
+        .map_err(|_| PonzimonError::RandomnessNotResolved)?;
+
+    // Settle rewards before changing berry consumption
+    update_pool(gs, clock.slot);
+    player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+
+    // Store the card indices before removing them
+    let recycled_indices = player.recycle_card_indices.clone();
+
+    // Calculate total berry consumption of cards to be removed
+    let mut total_berry_reduction = 0u64;
+    for &index in &recycled_indices {
+        if let Some(card) = &player.cards[index as usize] {
+            if player.is_card_staked(index) {
+                total_berry_reduction += card.berry_consumption as u64;
+            }
+        }
+    }
+
+    // Remove the 10 cards (sorted in descending order to avoid index shifting issues)
+    let mut sorted_indices = recycled_indices.clone();
+    sorted_indices.sort_by(|a, b| b.cmp(a)); // Sort in descending order
+
+    for &index in &sorted_indices {
+        player.remove_card(index)?;
+    }
+
+    // Update berry consumption
+    player.berries = player.berries.saturating_sub(total_berry_reduction);
+    gs.total_berries = gs.total_berries.saturating_sub(total_berry_reduction);
+
+    // Use random value to determine success (20% chance)
+    let random_percent = (random_value[0] as u32) % 100;
+    let success = random_percent < 20; // 20% chance
+
+    let mut new_card_id = None;
+
+    if success {
+        // Generate a random new card
+        let mut random_bytes: [u8; 4] = [0; 4];
+        random_bytes.copy_from_slice(&random_value[4..8]);
+        let random_u32 = u32::from_le_bytes(random_bytes);
+
+        // Generate random rarity (same distribution as booster packs)
+        let random_percent = random_u32 % 100;
+        let rarity = match random_percent {
+            0..=49 => COMMON,       // 50%
+            50..=74 => UNCOMMON,    // 25%
+            75..=89 => RARE,        // 15%
+            90..=95 => DOUBLE_RARE, // 6%
+            96..=98 => VERY_RARE,   // 3%
+            _ => SUPER_RARE,        // 1%
+        };
+
+        // Find a random card of the determined rarity
+        let cards_of_rarity: Vec<&(u16, u8, u16, u8)> = CARD_DATA
+            .iter()
+            .filter(|(_, card_rarity, _, _)| *card_rarity == rarity)
+            .collect();
+
+        if !cards_of_rarity.is_empty() {
+            let card_index = (random_u32 as usize) % cards_of_rarity.len();
+            let (card_id, _, power, berry_consumption) = cards_of_rarity[card_index];
+
+            require!(
+                (player.card_count as usize) < MAX_CARDS_PER_PLAYER as usize,
+                PonzimonError::MachineCapacityExceeded
+            );
+
+            let new_card = Card {
+                id: *card_id,
+                rarity,
+                power: *power,
+                berry_consumption: *berry_consumption,
+            };
+            player.add_card(new_card)?;
+            new_card_id = Some(*card_id);
+        }
+    }
+
+    // Reset recycle state
+    player.has_pending_recycle = false;
+    player.recycle_commit_slot = 0;
+    player.recycle_randomness_account = Pubkey::default();
+    player.recycle_card_indices = [0; 10];
+
+    emit!(CardsRecycled {
+        player: player.key(),
+        recycled_cards: recycled_indices,
+        success,
+        new_card_id,
+    });
 
     Ok(())
 }

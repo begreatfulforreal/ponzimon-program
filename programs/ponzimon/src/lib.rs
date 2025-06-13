@@ -117,6 +117,18 @@ pub mod ponzimon {
     pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
         instructions::gamble_settle(ctx)
     }
+
+    pub fn recycle_cards_commit(
+        ctx: Context<RecycleCardsCommit>,
+        randomness_account: Pubkey,
+        card_indices: [u8; 10],
+    ) -> Result<()> {
+        instructions::recycle_cards_commit(ctx, randomness_account, card_indices)
+    }
+
+    pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
+        instructions::recycle_cards_settle(ctx)
+    }
 }
 
 fn enforce_admin(key: &Pubkey) -> Result<()> {

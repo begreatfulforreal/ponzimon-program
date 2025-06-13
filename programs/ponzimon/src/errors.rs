@@ -74,6 +74,14 @@ pub enum PonzimonError {
     BoosterAlreadyPending,
     #[msg("Player does not have a pending booster pack to settle.")]
     NoBoosterPending,
+    #[msg("Player already has a pending card recycle request.")]
+    RecycleAlreadyPending,
+    #[msg("Player does not have a pending card recycle to settle.")]
+    NoRecyclePending,
+    #[msg("Must provide exactly 10 cards for recycling.")]
+    InvalidRecycleCardCount,
+    #[msg("Duplicate card indices not allowed in recycle.")]
+    DuplicateRecycleCardIndices,
 
     // Security-related error variants
     #[msg("Minimum delay not met for randomness commitment")]

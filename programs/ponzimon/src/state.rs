@@ -62,6 +62,12 @@ pub struct Player {
     pub has_pending_booster: bool,
     pub booster_randomness_account: Pubkey,
     pub booster_commit_slot: u64,
+
+    // Card Recycling
+    pub has_pending_recycle: bool,
+    pub recycle_randomness_account: Pubkey,
+    pub recycle_commit_slot: u64,
+    pub recycle_card_indices: [u8; 10], // Store the 10 card indices to recycle
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
