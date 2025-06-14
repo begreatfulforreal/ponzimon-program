@@ -243,11 +243,11 @@ async function initializeProgram(
 
     console.log("Transaction signature:", tx);
     console.log("Program initialized successfully!");
-    console.log("NEXT_PUBLIC_GLOBAL_STATE_KEY =", globalStateKey.toString());
-    console.log("NEXT_PUBLIC_TOKEN_MINT =", tokenMint.toString());
-    console.log("NEXT_PUBLIC_FEES_WALLET =", feesWallet.toString());
+    console.log("GLOBAL_STATE_KEY =", globalStateKey.toString());
+    console.log("TOKEN_MINT =", tokenMint.toString());
+    console.log("FEES_WALLET =", feesWallet.toString());
     console.log(
-      "NEXT_PUBLIC_FEES_TOKEN_ACCOUNT =",
+      "FEES_TOKEN_ACCOUNT =",
       feesTokenAccount.toString()
     );
   } catch (error) {

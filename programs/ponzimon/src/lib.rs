@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 const ADMIN: &str = "8kvqgxQG77pv6RvEou8f2kHSWi3rtx8F7MksXUqNLGmn";
 
-declare_id!("ponHUhwQLrCnHdYiYJcboxwKsA3GxZctCKYJr5SnTwr");
+declare_id!("poZtdctreTZQ9PcmEj1LK4KKHn8jutctwJecALNcDjU");
 
 #[program]
 pub mod ponzimon {
