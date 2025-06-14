@@ -88,11 +88,8 @@ pub mod ponzimon {
         instructions::discard_card(ctx, card_index)
     }
 
-    pub fn request_open_booster(
-        ctx: Context<RequestOpenBooster>,
-        randomness_account: Pubkey,
-    ) -> Result<()> {
-        instructions::request_open_booster(ctx, randomness_account)
+    pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
+        instructions::request_open_booster(ctx)
     }
     pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
         instructions::settle_open_booster(ctx)
@@ -106,12 +103,8 @@ pub mod ponzimon {
         instructions::claim_rewards(ctx)
     }
 
-    pub fn gamble_commit(
-        ctx: Context<GambleCommit>,
-        randomness_account: Pubkey,
-        amount: u64,
-    ) -> Result<()> {
-        instructions::gamble_commit(ctx, randomness_account, amount)
+    pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
+        instructions::gamble_commit(ctx, amount)
     }
 
     pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
@@ -120,10 +113,9 @@ pub mod ponzimon {
 
     pub fn recycle_cards_commit(
         ctx: Context<RecycleCardsCommit>,
-        randomness_account: Pubkey,
         card_indices: [u8; 10],
     ) -> Result<()> {
-        instructions::recycle_cards_commit(ctx, randomness_account, card_indices)
+        instructions::recycle_cards_commit(ctx, card_indices)
     }
 
     pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {

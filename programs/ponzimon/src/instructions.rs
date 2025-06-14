@@ -1014,10 +1014,7 @@ pub struct RequestOpenBooster<'info> {
     pub randomness_account_data: AccountInfo<'info>,
 }
 
-pub fn request_open_booster(
-    ctx: Context<RequestOpenBooster>,
-    randomness_account: Pubkey,
-) -> Result<()> {
+pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
     let slot = Clock::get()?.slot;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
@@ -1043,7 +1040,7 @@ pub fn request_open_booster(
     )?;
 
     // Booster pack cost: 100 tokens
-    let booster_cost = 100_000_000; // 100 tokens in microtokens
+    let booster_cost = 10; // 100 tokens in microtokens
     require!(
         ctx.accounts.player_token_account.amount >= booster_cost,
         PonzimonError::InsufficientTokens
@@ -1087,7 +1084,7 @@ pub fn request_open_booster(
     // Set player state for settlement
     player.has_pending_booster = true;
     player.booster_commit_slot = randomness_data.seed_slot;
-    player.booster_randomness_account = randomness_account;
+    player.booster_randomness_account = ctx.accounts.randomness_account_data.key();
 
     Ok(())
 }
@@ -1391,11 +1388,7 @@ pub struct GambleCommit<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn gamble_commit(
-    ctx: Context<GambleCommit>,
-    randomness_account: Pubkey,
-    amount: u64,
-) -> Result<()> {
+pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
     let clock = Clock::get()?;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
@@ -1421,7 +1414,7 @@ pub fn gamble_commit(
 
     // Track the player's committed values
     player.commit_slot = randomness_data.seed_slot;
-    player.randomness_account = randomness_account;
+    player.randomness_account = ctx.accounts.randomness_account_data.key();
     player.current_gamble_amount = amount;
     player.has_pending_gamble = true;
 
@@ -1592,7 +1585,6 @@ pub struct RecycleCardsCommit<'info> {
 
 pub fn recycle_cards_commit(
     ctx: Context<RecycleCardsCommit>,
-    randomness_account: Pubkey,
     card_indices: [u8; 10],
 ) -> Result<()> {
     let slot = Clock::get()?.slot;
@@ -1635,7 +1627,7 @@ pub fn recycle_cards_commit(
     player.recycle_card_indices = card_indices;
     player.has_pending_recycle = true;
     player.recycle_commit_slot = randomness_data.seed_slot;
-    player.recycle_randomness_account = randomness_account;
+    player.recycle_randomness_account = ctx.accounts.randomness_account_data.key();
 
     Ok(())
 }
