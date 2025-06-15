@@ -35,6 +35,20 @@ pub struct GlobalState {
     pub total_global_gamble_wins: u64, // Total number of wins across all players
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
+pub enum PendingRandomAction {
+    None,
+    Gamble { amount: u64 },
+    Booster,
+    Recycle { indices: [u8; 10] },
+}
+
+impl Default for PendingRandomAction {
+    fn default() -> Self {
+        PendingRandomAction::None
+    }
+}
+
 #[account]
 pub struct Player {
     pub owner: Pubkey,
@@ -52,21 +66,9 @@ pub struct Player {
     pub total_gamble_wins: u64, // Total number of times player has won gambling
 
     // Switchboard randomness fields
+    pub pending_action: PendingRandomAction,
     pub randomness_account: Pubkey, // Reference to the Switchboard randomness account
     pub commit_slot: u64,           // The slot at which the randomness was committed
-    pub current_gamble_amount: u64, // Amount currently being gambled
-    pub has_pending_gamble: bool,   // Whether there's a pending gamble to settle
-
-    // Booster Packs
-    pub has_pending_booster: bool,
-    pub booster_randomness_account: Pubkey,
-    pub booster_commit_slot: u64,
-
-    // Card Recycling
-    pub has_pending_recycle: bool,
-    pub recycle_randomness_account: Pubkey,
-    pub recycle_commit_slot: u64,
-    pub recycle_card_indices: [u8; 10], // Store the 10 card indices to recycle
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]

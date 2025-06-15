@@ -395,29 +395,23 @@ pub struct PurchaseInitialFarm<'info> {
         init,
         payer = player_wallet,
         space = 8      // discriminator
-            + 32       // owner
-            + 10       // farm
-            + (MAX_CARDS_PER_PLAYER as usize * 6) // cards: [Card; MAX_CARDS_PER_PLAYER] - Card = 6 bytes
+            + 32       // owner: Pubkey
+            + 10       // farm: Farm (1+1+8)
+            + (MAX_CARDS_PER_PLAYER as usize * 6) // cards: [Card; MAX_CARDS_PER_PLAYER] - Card = 6 bytes (2+1+2+1)
             + 1        // card_count: u8
             + 8        // staked_cards_bitset: u64
-            + 8        // berries
-            + 33       // referrer
-            + 16       // last_acc_tokens_per_berry
-            + 8        // last_claim_slot
-            + 8        // last_upgrade_slot
-            + 8        // total_rewards
-            + 8 + 8    // total_gambles + total_gamble_wins
-            + 32       // randomness_account (gambling)
-            + 8        // commit_slot (gambling)
-            + 8        // current_gamble_amount
-            + 1        // has_pending_gamble
-            + 1        // has_pending_booster
-            + 32       // booster_randomness_account
-            + 8        // booster_commit_slot
-            + 1        // has_pending_recycle
-            + 32       // recycle_randomness_account
-            + 8        // recycle_commit_slot
-            + 10,      // recycle_card_indices [u8; 10]
+            + 8        // berries: u64
+            + 33       // referrer: Option<Pubkey> (1+32)
+            + 16       // last_acc_tokens_per_berry: u128
+            + 8        // last_claim_slot: u64
+            + 8        // last_upgrade_slot: u64
+            + 8        // total_rewards: u64
+            + 8        // total_gambles: u64
+            + 8        // total_gamble_wins: u64
+            // --- Consolidated randomness fields ---
+            + 11       // pending_action: PendingRandomAction enum (1 byte disc + 10 for largest variant)
+            + 32       // randomness_account: Pubkey
+            + 8,       // commit_slot: u64
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -536,21 +530,9 @@ pub fn purchase_initial_farm(
     // Initialize gambling fields
     player.total_gambles = 0;
     player.total_gamble_wins = 0;
+    player.pending_action = PendingRandomAction::None;
     player.randomness_account = Pubkey::default();
     player.commit_slot = 0;
-    player.current_gamble_amount = 0;
-    player.has_pending_gamble = false;
-
-    // Initialize booster pack fields
-    player.has_pending_booster = false;
-    player.booster_randomness_account = Pubkey::default();
-    player.booster_commit_slot = 0;
-
-    // Initialize recycle fields
-    player.has_pending_recycle = false;
-    player.recycle_randomness_account = Pubkey::default();
-    player.recycle_commit_slot = 0;
-    player.recycle_card_indices = [0; 10];
 
     // global stats (Effect) - no initial berry consumption since cards aren't staked
     // gs.total_berries += 0; // No change needed
@@ -984,7 +966,7 @@ pub struct RequestOpenBooster<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        constraint = !player.has_pending_booster @ PonzimonError::BoosterAlreadyPending,
+        constraint = player.pending_action == PendingRandomAction::None @ PonzimonError::BoosterAlreadyPending,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -1082,9 +1064,9 @@ pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
     )?;
 
     // Set player state for settlement
-    player.has_pending_booster = true;
-    player.booster_commit_slot = randomness_data.seed_slot;
-    player.booster_randomness_account = ctx.accounts.randomness_account_data.key();
+    player.pending_action = PendingRandomAction::Booster;
+    player.commit_slot = randomness_data.seed_slot;
+    player.randomness_account = ctx.accounts.randomness_account_data.key();
 
     Ok(())
 }
@@ -1096,7 +1078,7 @@ pub struct SettleOpenBooster<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        constraint = player.has_pending_booster @ PonzimonError::NoBoosterPending,
+        constraint = player.pending_action == PendingRandomAction::Booster @ PonzimonError::NoBoosterPending,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -1118,20 +1100,21 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
     let gs = &mut ctx.accounts.global_state;
 
     // Security: Validate minimum delay for randomness
-    validate_randomness_delay(player.booster_commit_slot, clock.slot)?;
+    validate_randomness_delay(player.commit_slot, clock.slot)?;
 
     // Verify the randomness account
-    if ctx.accounts.randomness_account_data.key() != player.booster_randomness_account {
+    if ctx.accounts.randomness_account_data.key() != player.randomness_account {
         return Err(PonzimonError::InvalidRandomnessAccount.into());
     }
     let randomness_data =
         RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
-    if randomness_data.seed_slot != player.booster_commit_slot {
+    if randomness_data.seed_slot != player.commit_slot {
         return Err(PonzimonError::RandomnessExpired.into());
     }
     let random_value = randomness_data
         .get_value(&clock)
         .map_err(|_| PonzimonError::RandomnessNotResolved)?;
+    msg!("random_value ---- {:?}", random_value);
 
     // Settle rewards before changing berry consumption
     update_pool(gs, clock.slot);
@@ -1184,9 +1167,8 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
     }
 
     // Reset booster state
-    player.has_pending_booster = false;
-    player.booster_commit_slot = 0;
-    player.booster_randomness_account = Pubkey::default();
+    player.pending_action = PendingRandomAction::None;
+    player.commit_slot = 0;
 
     emit!(BoosterOpened {
         player: player.key(),
@@ -1335,17 +1317,9 @@ pub fn reset_player(ctx: Context<ResetPlayer>) -> Result<()> {
     player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
 
     // Reset any pending operations
-    player.has_pending_gamble = false;
-    player.has_pending_booster = false;
-    player.has_pending_recycle = false;
+    player.pending_action = PendingRandomAction::None;
     player.randomness_account = Pubkey::default();
-    player.booster_randomness_account = Pubkey::default();
-    player.recycle_randomness_account = Pubkey::default();
     player.commit_slot = 0;
-    player.booster_commit_slot = 0;
-    player.recycle_commit_slot = 0;
-    player.current_gamble_amount = 0;
-    player.recycle_card_indices = [0; 10];
 
     Ok(())
 }
@@ -1357,7 +1331,7 @@ pub struct GambleCommit<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        constraint = !player.has_pending_gamble @ PonzimonError::AlreadyHasPendingGamble,
+        constraint = player.pending_action == PendingRandomAction::None @ PonzimonError::AlreadyHasPendingGamble,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -1415,8 +1389,7 @@ pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
     // Track the player's committed values
     player.commit_slot = randomness_data.seed_slot;
     player.randomness_account = ctx.accounts.randomness_account_data.key();
-    player.current_gamble_amount = amount;
-    player.has_pending_gamble = true;
+    player.pending_action = PendingRandomAction::Gamble { amount };
 
     // Optional SOL fee (0.01 SOL)
     anchor_lang::system_program::transfer(
@@ -1462,7 +1435,7 @@ pub struct GambleSettle<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        constraint = player.has_pending_gamble @ PonzimonError::NoPendingGamble,
+        constraint = matches!(player.pending_action, PendingRandomAction::Gamble { .. }) @ PonzimonError::NoPendingGamble,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -1512,6 +1485,13 @@ pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
         .get_value(&clock)
         .map_err(|_| PonzimonError::RandomnessNotResolved)?;
 
+    let gamble_amount = if let PendingRandomAction::Gamble { amount } = player.pending_action {
+        amount
+    } else {
+        // Should be unreachable due to the constraint, but good practice
+        return Err(PonzimonError::NoPendingGamble.into());
+    };
+
     // Use revealed random value for slot machine odds (2.5% chance for 10x = ~75% house edge)
     let randomness_result = revealed_random_value[0] % 100 < 3; // ~3% chance to win
 
@@ -1519,7 +1499,7 @@ pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
         msg!("GAMBLE_RESULT: WIN!");
 
         // Player wins 10x their original amount
-        let win_amount = player.current_gamble_amount * 10;
+        let win_amount = gamble_amount * 10;
 
         player.total_gamble_wins = player.total_gamble_wins.saturating_add(1);
         gs.total_global_gamble_wins = gs.total_global_gamble_wins.saturating_add(1);
@@ -1550,9 +1530,7 @@ pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
     }
 
     // Reset gambling state
-    player.has_pending_gamble = false;
-    player.current_gamble_amount = 0;
-    player.randomness_account = Pubkey::default();
+    player.pending_action = PendingRandomAction::None;
     player.commit_slot = 0;
 
     Ok(())
@@ -1567,7 +1545,7 @@ pub struct RecycleCardsCommit<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        constraint = !player.has_pending_recycle @ PonzimonError::RecycleAlreadyPending,
+        constraint = player.pending_action == PendingRandomAction::None @ PonzimonError::RecycleAlreadyPending,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -1624,10 +1602,11 @@ pub fn recycle_cards_commit(
     }
 
     // Store the card indices and set pending state
-    player.recycle_card_indices = card_indices;
-    player.has_pending_recycle = true;
-    player.recycle_commit_slot = randomness_data.seed_slot;
-    player.recycle_randomness_account = ctx.accounts.randomness_account_data.key();
+    player.pending_action = PendingRandomAction::Recycle {
+        indices: card_indices,
+    };
+    player.commit_slot = randomness_data.seed_slot;
+    player.randomness_account = ctx.accounts.randomness_account_data.key();
 
     Ok(())
 }
@@ -1639,7 +1618,7 @@ pub struct RecycleCardsSettle<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        constraint = player.has_pending_recycle @ PonzimonError::NoRecyclePending,
+        constraint = matches!(player.pending_action, PendingRandomAction::Recycle { .. }) @ PonzimonError::NoRecyclePending,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -1661,15 +1640,15 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
     let gs = &mut ctx.accounts.global_state;
 
     // Security: Validate minimum delay for randomness
-    validate_randomness_delay(player.recycle_commit_slot, clock.slot)?;
+    validate_randomness_delay(player.commit_slot, clock.slot)?;
 
     // Verify the randomness account
-    if ctx.accounts.randomness_account_data.key() != player.recycle_randomness_account {
+    if ctx.accounts.randomness_account_data.key() != player.randomness_account {
         return Err(PonzimonError::InvalidRandomnessAccount.into());
     }
     let randomness_data =
         RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
-    if randomness_data.seed_slot != player.recycle_commit_slot {
+    if randomness_data.seed_slot != player.commit_slot {
         return Err(PonzimonError::RandomnessExpired.into());
     }
     let random_value = randomness_data
@@ -1681,7 +1660,11 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
     player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
 
     // Store the card indices before removing them
-    let recycled_indices = player.recycle_card_indices.clone();
+    let recycled_indices = if let PendingRandomAction::Recycle { indices } = player.pending_action {
+        indices
+    } else {
+        return Err(PonzimonError::NoRecyclePending.into());
+    };
 
     // Calculate total berry consumption of cards to be removed
     let mut total_berry_reduction = 0u64;
@@ -1754,10 +1737,8 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
     }
 
     // Reset recycle state
-    player.has_pending_recycle = false;
-    player.recycle_commit_slot = 0;
-    player.recycle_randomness_account = Pubkey::default();
-    player.recycle_card_indices = [0; 10];
+    player.pending_action = PendingRandomAction::None;
+    player.commit_slot = 0;
 
     emit!(CardsRecycled {
         player: player.key(),

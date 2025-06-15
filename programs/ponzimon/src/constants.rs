@@ -5,7 +5,7 @@ pub const PLAYER_SEED: &[u8] = b"player";
 pub const ACC_SCALE: u128 = 1_000_000_000_000; // 1e12
 
 // Security constants
-pub const MIN_RANDOMNESS_DELAY_SLOTS: u64 = 3; // Minimum slots between commit and settle
+pub const MIN_RANDOMNESS_DELAY_SLOTS: u64 = 2; // Minimum slots between commit and settle
 pub const MAX_CARDS_PER_PLAYER: u8 = 200; // Maximum cards a player can have
 pub const MAX_STAKED_CARDS_PER_PLAYER: u8 = 25; // Maximum staked cards a player can have
 pub const MAX_FARM_TYPE: u8 = 10; // Maximum valid farm type
