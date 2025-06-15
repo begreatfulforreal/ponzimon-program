@@ -444,6 +444,8 @@ pub struct PurchaseInitialFarm<'info> {
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+    /// CHECK: The account's data is validated manually within the handler.
+    pub randomness_account_data: AccountInfo<'info>,
 }
 
 #[event]
@@ -531,7 +533,9 @@ pub fn purchase_initial_farm(
     player.total_gambles = 0;
     player.total_gamble_wins = 0;
     player.pending_action = PendingRandomAction::None;
-    player.randomness_account = Pubkey::default();
+    // verify randomness account data is valid
+    RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
+    player.randomness_account = ctx.accounts.randomness_account_data.key();
     player.commit_slot = 0;
 
     // global stats (Effect) - no initial berry consumption since cards aren't staked
