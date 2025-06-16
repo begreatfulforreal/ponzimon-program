@@ -199,8 +199,6 @@ fn settle_and_mint_rewards<'info>(
     gs: &mut Account<'info, GlobalState>,
     now: u64,
     player_token_account: &AccountInfo<'info>,
-    referrer_token_account: Option<&AccountInfo<'info>>,
-    fees_token_account: &AccountInfo<'info>,
     token_mint: &AccountInfo<'info>,
     token_program: &AccountInfo<'info>,
     global_state_bump: u8,
@@ -240,9 +238,8 @@ fn settle_and_mint_rewards<'info>(
     player.last_claim_slot = now;
     player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
 
-    // split referral based on global_state.referral_fee
-    let referral_amount = pending * gs.referral_fee as u64 / 100;
-    let player_amount = pending - referral_amount;
+    // Give the player their full rewards - no deduction for referrals
+    let player_amount = pending;
 
     // Update player total rewards (Effect)
     player.total_rewards = player.total_rewards.saturating_add(player_amount);
@@ -256,7 +253,7 @@ fn settle_and_mint_rewards<'info>(
     ];
     let signer = &[&seeds[..]];
 
-    // mint to player
+    // mint to player - they get their full rewards
     token::mint_to(
         CpiContext::new_with_signer(
             token_program.clone(),
@@ -269,40 +266,6 @@ fn settle_and_mint_rewards<'info>(
         ),
         player_amount,
     )?;
-
-    // referral / governance
-    if let Some(referrer_account) = referrer_token_account {
-        token::mint_to(
-            CpiContext::new_with_signer(
-                token_program.clone(),
-                MintTo {
-                    mint: token_mint.clone(),
-                    to: referrer_account.clone(),
-                    authority: gs.to_account_info(),
-                },
-                signer,
-            ),
-            referral_amount,
-        )?;
-
-        // Track how much this player has generated for their referrer
-        player.total_earnings_for_referrer = player
-            .total_earnings_for_referrer
-            .saturating_add(referral_amount);
-    } else {
-        token::mint_to(
-            CpiContext::new_with_signer(
-                token_program.clone(),
-                MintTo {
-                    mint: token_mint.clone(),
-                    to: fees_token_account.clone(),
-                    authority: gs.to_account_info(),
-                },
-                signer,
-            ),
-            referral_amount,
-        )?;
-    }
 
     Ok(pending)
 }
@@ -398,7 +361,6 @@ pub fn initialize_program(
 ///  PURCHASE INITIAL FARM
 /// ────────────────────────────────────────────────────────────────────────────
 #[derive(Accounts)]
-#[instruction(referrer: Option<Pubkey>)]
 pub struct PurchaseInitialFarm<'info> {
     #[account(mut)]
     pub player_wallet: Signer<'info>,
@@ -446,6 +408,9 @@ pub struct PurchaseInitialFarm<'info> {
         constraint = fees_wallet.key() == global_state.fees_wallet @ PonzimonError::Unauthorized
     )]
     pub fees_wallet: AccountInfo<'info>,
+    /// CHECK: This is the referrer's wallet. Optional. If provided, the wallet key is used as the referrer.
+    #[account(mut)]
+    pub referrer_wallet: Option<UncheckedAccount<'info>>,
     #[account(
         mut,
         constraint = token_mint.key() == global_state.token_mint @ PonzimonError::InvalidTokenMint
@@ -477,10 +442,7 @@ pub struct InitialFarmPurchased {
     pub slot: u64,
 }
 
-pub fn purchase_initial_farm(
-    ctx: Context<PurchaseInitialFarm>,
-    referrer: Option<Pubkey>,
-) -> Result<()> {
+pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
     let slot = Clock::get()?.slot;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
@@ -491,7 +453,10 @@ pub fn purchase_initial_farm(
         PonzimonError::InitialFarmAlreadyPurchased
     );
 
-    // Prevent self-referral
+    // The referrer is now derived from the optional `referrer_wallet` account.
+    let referrer: Option<Pubkey> = ctx.accounts.referrer_wallet.as_ref().map(|acc| acc.key());
+
+    // Prevent self-referral.
     if let Some(ref r) = referrer {
         require!(
             *r != ctx.accounts.player_wallet.key(),
@@ -499,20 +464,62 @@ pub fn purchase_initial_farm(
         );
     }
 
-    // Make sure pool is up to date
+    // Make sure the reward pool is up to date before any state changes.
     update_pool(gs, slot);
 
-    // transfer initial farm purchase fee to fees wallet
-    anchor_lang::system_program::transfer(
-        CpiContext::new(
-            ctx.accounts.system_program.to_account_info(),
-            anchor_lang::system_program::Transfer {
-                from: ctx.accounts.player_wallet.to_account_info(),
-                to: ctx.accounts.fees_wallet.to_account_info(),
-            },
-        ),
-        INITIAL_FARM_PURCHASE_FEE_LAMPORTS,
-    )?;
+    // --- Fee and Referral Logic ---
+    if let Some(referrer_wallet) = &ctx.accounts.referrer_wallet {
+        // A referrer is provided, so we split the fee into two transfers.
+        let referral_fee_lamports = INITIAL_FARM_PURCHASE_FEE_LAMPORTS
+            .saturating_mul(gs.referral_fee as u64)
+            .saturating_div(100);
+
+        let fees_wallet_amount =
+            INITIAL_FARM_PURCHASE_FEE_LAMPORTS.saturating_sub(referral_fee_lamports);
+
+        // 1. Transfer the referral commission to the referrer's wallet.
+        if referral_fee_lamports > 0 {
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.player_wallet.to_account_info(),
+                        to: referrer_wallet.to_account_info(),
+                    },
+                ),
+                referral_fee_lamports,
+            )?;
+            player.total_earnings_for_referrer = player
+                .total_earnings_for_referrer
+                .saturating_add(referral_fee_lamports);
+        }
+
+        // 2. Transfer the remaining protocol fee to the main fees wallet.
+        if fees_wallet_amount > 0 {
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.player_wallet.to_account_info(),
+                        to: ctx.accounts.fees_wallet.to_account_info(),
+                    },
+                ),
+                fees_wallet_amount,
+            )?;
+        }
+    } else {
+        // No referrer, so the entire fee goes to the protocol wallet in a single transfer.
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.player_wallet.to_account_info(),
+                    to: ctx.accounts.fees_wallet.to_account_info(),
+                },
+            ),
+            INITIAL_FARM_PURCHASE_FEE_LAMPORTS,
+        )?;
+    }
 
     // player bootstrap
     player.owner = ctx.accounts.player_wallet.key();
@@ -645,8 +652,6 @@ pub fn discard_card(ctx: Context<DiscardCard>, card_index: u8) -> Result<()> {
         gs,
         slot,
         &ctx.accounts.player_token_account.to_account_info(),
-        None,
-        &ctx.accounts.fees_token_account.to_account_info(),
         &ctx.accounts.token_mint.to_account_info(),
         &ctx.accounts.token_program.to_account_info(),
         ctx.bumps.global_state,
@@ -880,8 +885,6 @@ pub fn upgrade_farm(ctx: Context<UpgradeFarm>, farm_type: u8) -> Result<()> {
         gs,
         slot,
         &ctx.accounts.player_token_account.to_account_info(),
-        None,
-        &ctx.accounts.fees_token_account.to_account_info(),
         &ctx.accounts.token_mint.to_account_info(),
         &ctx.accounts.token_program.to_account_info(),
         ctx.bumps.global_state,
@@ -970,18 +973,6 @@ pub struct ClaimRewards<'info> {
         constraint = player_token_account.mint == global_state.token_mint
     )]
     pub player_token_account: Box<Account<'info, TokenAccount>>,
-    #[account(
-        mut,
-        constraint = player.referrer.is_some() && referrer_token_account.owner == player.referrer.unwrap() @ PonzimonError::InvalidReferrer,
-        constraint = referrer_token_account.mint == global_state.token_mint @ PonzimonError::InvalidTokenMint
-    )]
-    pub referrer_token_account: Option<Box<Account<'info, TokenAccount>>>,
-    #[account(
-        mut,
-        constraint = fees_token_account.mint == global_state.token_mint,
-        constraint = fees_token_account.owner == global_state.fees_wallet @ PonzimonError::Unauthorized
-    )]
-    pub fees_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
     pub token_mint: Account<'info, Mint>,
     pub token_program: Program<'info, Token>,
@@ -995,12 +986,6 @@ pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
         &mut ctx.accounts.global_state,
         now,
         &ctx.accounts.player_token_account.to_account_info(),
-        ctx.accounts
-            .referrer_token_account
-            .as_ref()
-            .map(|a| a.to_account_info())
-            .as_ref(),
-        &ctx.accounts.fees_token_account.to_account_info(),
         &ctx.accounts.token_mint.to_account_info(),
         &ctx.accounts.token_program.to_account_info(),
         ctx.bumps.global_state,
@@ -1041,6 +1026,9 @@ pub struct RequestOpenBooster<'info> {
         constraint = fees_token_account.owner == global_state.fees_wallet @ PonzimonError::Unauthorized
     )]
     pub fees_token_account: Box<Account<'info, TokenAccount>>,
+    /// CHECK: This is the referrer's token account. Optional, but required if the player has a referrer.
+    #[account(mut)]
+    pub referrer_token_account: Option<Account<'info, TokenAccount>>,
     #[account(mut)]
     pub token_mint: Account<'info, Mint>,
     pub token_program: Program<'info, Token>,
@@ -1066,19 +1054,13 @@ pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
         gs,
         slot,
         &ctx.accounts.player_token_account.to_account_info(),
-        None,
-        &ctx.accounts.fees_token_account.to_account_info(),
         &ctx.accounts.token_mint.to_account_info(),
         &ctx.accounts.token_program.to_account_info(),
         ctx.bumps.global_state,
     )?;
 
-    // Booster pack cost
+    // --- Token Fee, Burn, and Referral Logic ---
     let booster_cost = BOOSTER_PACK_COST_MICROTOKENS;
-    require!(
-        ctx.accounts.player_token_account.amount >= booster_cost,
-        PonzimonError::InsufficientTokens
-    );
 
     // Validate Switchboard randomness account
     let randomness_data =
@@ -1088,32 +1070,91 @@ pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
     }
 
     // Burn/transfer tokens for the pack
-    let burn_amount = booster_cost * gs.burn_rate as u64 / 100;
-    let fees_amount = booster_cost - burn_amount;
-    gs.burned_tokens = gs.burned_tokens.saturating_add(burn_amount);
+    let burn_amount = booster_cost
+        .saturating_mul(gs.burn_rate as u64)
+        .saturating_div(100);
+    let fees_amount = booster_cost.saturating_sub(burn_amount);
 
-    token::burn(
-        CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            Burn {
-                mint: ctx.accounts.token_mint.to_account_info(),
-                from: ctx.accounts.player_token_account.to_account_info(),
-                authority: ctx.accounts.player_wallet.to_account_info(),
-            },
-        ),
-        burn_amount,
-    )?;
-    token::transfer(
-        CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
-            Transfer {
-                from: ctx.accounts.player_token_account.to_account_info(),
-                to: ctx.accounts.fees_token_account.to_account_info(),
-                authority: ctx.accounts.player_wallet.to_account_info(),
-            },
-        ),
-        fees_amount,
-    )?;
+    // First, burn the designated amount from the player's account.
+    if burn_amount > 0 {
+        gs.burned_tokens = gs.burned_tokens.saturating_add(burn_amount);
+        token::burn(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Burn {
+                    mint: ctx.accounts.token_mint.to_account_info(),
+                    from: ctx.accounts.player_token_account.to_account_info(),
+                    authority: ctx.accounts.player_wallet.to_account_info(),
+                },
+            ),
+            burn_amount,
+        )?;
+    }
+
+    // Next, handle the fees, splitting them if a referrer exists.
+    if let Some(referrer) = player.referrer {
+        require!(
+            ctx.accounts.referrer_token_account.clone().unwrap().owner == referrer.key(),
+            PonzimonError::ReferrerAccountMissing
+        );
+        let referral_commission = fees_amount
+            .saturating_mul(gs.referral_fee as u64)
+            .saturating_div(100);
+        let protocol_fee = fees_amount.saturating_sub(referral_commission);
+
+        // Transfer commission to the referrer.
+        if referral_commission > 0 {
+            token::transfer(
+                CpiContext::new(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.player_token_account.to_account_info(),
+                        to: ctx
+                            .accounts
+                            .referrer_token_account
+                            .clone()
+                            .unwrap()
+                            .to_account_info(),
+                        authority: ctx.accounts.player_wallet.to_account_info(),
+                    },
+                ),
+                referral_commission,
+            )?;
+            player.total_earnings_for_referrer = player
+                .total_earnings_for_referrer
+                .saturating_add(referral_commission);
+        }
+
+        // Transfer the remaining fee to the protocol wallet.
+        if protocol_fee > 0 {
+            token::transfer(
+                CpiContext::new(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.player_token_account.to_account_info(),
+                        to: ctx.accounts.fees_token_account.to_account_info(),
+                        authority: ctx.accounts.player_wallet.to_account_info(),
+                    },
+                ),
+                protocol_fee,
+            )?;
+        }
+    } else {
+        // No referrer, so the entire fee amount goes to the protocol.
+        if fees_amount > 0 {
+            token::transfer(
+                CpiContext::new(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.player_token_account.to_account_info(),
+                        to: ctx.accounts.fees_token_account.to_account_info(),
+                        authority: ctx.accounts.player_wallet.to_account_info(),
+                    },
+                ),
+                fees_amount,
+            )?;
+        }
+    }
 
     // Set player state for settlement
     player.pending_action = PendingRandomAction::Booster;
@@ -1534,16 +1575,11 @@ pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
     if ctx.accounts.randomness_account_data.key() != player.randomness_account {
         return Err(PonzimonError::InvalidRandomnessAccount.into());
     }
-
-    // Parse randomness data
     let randomness_data =
         RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
-
     if randomness_data.seed_slot != player.commit_slot {
         return Err(PonzimonError::RandomnessExpired.into());
     }
-
-    // Get the revealed random value
     let revealed_random_value = randomness_data
         .get_value(&clock)
         .map_err(|_| PonzimonError::RandomnessNotResolved)?;

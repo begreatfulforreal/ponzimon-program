@@ -26,6 +26,8 @@ pub enum PonzimonError {
     InitialFarmAlreadyPurchased,
     #[msg("Invalid referrer")]
     InvalidReferrer,
+    #[msg("The referrer's token account was not provided when required.")]
+    ReferrerAccountMissing,
     #[msg("Invalid token mint")]
     InvalidTokenMint,
     #[msg("New wallet restricted")]

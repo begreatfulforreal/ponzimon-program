@@ -69,11 +69,8 @@ pub mod ponzimon {
     // ────────────────────────────────────────────────────────────────────────────
     ///  NON ADMIN FUNCTIONS
     // ────────────────────────────────────────────────────────────────────────────
-    pub fn purchase_initial_farm(
-        ctx: Context<PurchaseInitialFarm>,
-        referrer: Option<Pubkey>,
-    ) -> Result<()> {
-        instructions::purchase_initial_farm(ctx, referrer)
+    pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
+        instructions::purchase_initial_farm(ctx)
     }
 
     pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
