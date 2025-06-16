@@ -284,6 +284,11 @@ fn settle_and_mint_rewards<'info>(
             ),
             referral_amount,
         )?;
+
+        // Track how much this player has generated for their referrer
+        player.total_earnings_for_referrer = player
+            .total_earnings_for_referrer
+            .saturating_add(referral_amount);
     } else {
         token::mint_to(
             CpiContext::new_with_signer(
@@ -321,7 +326,8 @@ pub struct InitializeProgram<'info> {
         + 8  + 16 + 8           /* current_rate + acc_tokens_per_berry (u128!) + last_reward_slot */
         + 1  + 1 + 1 + 8 + 8    /* burn_rate + referral_fee + prod + cooldown + dust_divisor */
         + 8                     /* total_berries */
-        + 8 + 8,                /* total_global_gambles + total_global_gamble_wins */
+        + 8 + 8                 /* total_global_gambles + total_global_gamble_wins */
+        + 8 + 8 + 8,            /* total_booster_packs_opened + total_card_recycling_attempts + total_successful_card_recycling */
         seeds=[GLOBAL_STATE_SEED, token_mint.key().as_ref()],
         bump
     )]
@@ -380,6 +386,11 @@ pub fn initialize_program(
 
     gs.total_berries = 0;
 
+    // Initialize new tracking fields
+    gs.total_booster_packs_opened = 0;
+    gs.total_card_recycling_attempts = 0;
+    gs.total_successful_card_recycling = 0;
+
     Ok(())
 }
 
@@ -411,7 +422,14 @@ pub struct PurchaseInitialFarm<'info> {
             // --- Consolidated randomness fields ---
             + 11       // pending_action: PendingRandomAction enum (1 byte disc + 10 for largest variant)
             + 32       // randomness_account: Pubkey
-            + 8,       // commit_slot: u64
+            + 8        // commit_slot: u64
+            // --- Additional player stats ---
+            + 8        // total_referral_earnings: u64
+            + 8        // total_booster_packs_opened: u64
+            + 8        // total_cards_recycled: u64
+            + 8        // successful_card_recycling: u64
+            + 8        // total_sol_spent: u64
+            + 8,       // total_tokens_spent: u64
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -484,7 +502,7 @@ pub fn purchase_initial_farm(
     // Make sure pool is up to date
     update_pool(gs, slot);
 
-    // transfer 1 SOL to fees wallet
+    // transfer initial farm purchase fee to fees wallet
     anchor_lang::system_program::transfer(
         CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
@@ -493,7 +511,7 @@ pub fn purchase_initial_farm(
                 to: ctx.accounts.fees_wallet.to_account_info(),
             },
         ),
-        300_000_000,
+        INITIAL_FARM_PURCHASE_FEE_LAMPORTS,
     )?;
 
     // player bootstrap
@@ -537,6 +555,14 @@ pub fn purchase_initial_farm(
     RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
     player.randomness_account = ctx.accounts.randomness_account_data.key();
     player.commit_slot = 0;
+
+    // Initialize new tracking fields
+    player.total_earnings_for_referrer = 0;
+    player.total_booster_packs_opened = 0;
+    player.total_cards_recycled = 0;
+    player.successful_card_recycling = 0;
+    player.total_sol_spent = INITIAL_FARM_PURCHASE_FEE_LAMPORTS;
+    player.total_tokens_spent = 0;
 
     // global stats (Effect) - no initial berry consumption since cards aren't staked
     // gs.total_berries += 0; // No change needed
@@ -608,6 +634,12 @@ pub fn discard_card(ctx: Context<DiscardCard>, card_index: u8) -> Result<()> {
         PonzimonError::CardIsStaked
     );
 
+    // Ensure the card is not pending recycling
+    require!(
+        !player.is_card_pending_recycling(card_index),
+        PonzimonError::CardPendingRecycling
+    );
+
     settle_and_mint_rewards(
         player,
         gs,
@@ -676,6 +708,13 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
         !player.is_card_staked(card_index),
         PonzimonError::CardIsStaked // Using for "already staked"
     );
+
+    // Ensure the card is not pending recycling
+    require!(
+        !player.is_card_pending_recycling(card_index),
+        PonzimonError::CardPendingRecycling
+    );
+
     require!(
         player.count_staked_cards() < player.farm.total_cards,
         PonzimonError::MachineCapacityExceeded
@@ -748,6 +787,12 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
     require!(
         player.is_card_staked(card_index),
         PonzimonError::CardNotStaked
+    );
+
+    // Ensure the card is not pending recycling
+    require!(
+        !player.is_card_pending_recycling(card_index),
+        PonzimonError::CardPendingRecycling
     );
 
     let card = &player.cards[card_index as usize];
@@ -862,6 +907,9 @@ pub fn upgrade_farm(ctx: Context<UpgradeFarm>, farm_type: u8) -> Result<()> {
 
     // Update global state for burned tokens
     gs.burned_tokens = gs.burned_tokens.saturating_add(burn_amount);
+
+    // Update player spending tracking
+    player.total_tokens_spent = player.total_tokens_spent.saturating_add(cost);
 
     // === INTERACTIONS ===
     // Burn tokens
@@ -1025,8 +1073,8 @@ pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
         ctx.bumps.global_state,
     )?;
 
-    // Booster pack cost: 100 tokens
-    let booster_cost = 10; // 100 tokens in microtokens
+    // Booster pack cost
+    let booster_cost = BOOSTER_PACK_COST_MICROTOKENS;
     require!(
         ctx.accounts.player_token_account.amount >= booster_cost,
         PonzimonError::InsufficientTokens
@@ -1071,6 +1119,9 @@ pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
     player.pending_action = PendingRandomAction::Booster;
     player.commit_slot = randomness_data.seed_slot;
     player.randomness_account = ctx.accounts.randomness_account_data.key();
+
+    // Update player spending tracking
+    player.total_tokens_spent = player.total_tokens_spent.saturating_add(booster_cost);
 
     Ok(())
 }
@@ -1173,6 +1224,10 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
     // Reset booster state
     player.pending_action = PendingRandomAction::None;
     player.commit_slot = 0;
+
+    // Update tracking statistics
+    player.total_booster_packs_opened = player.total_booster_packs_opened.saturating_add(1);
+    gs.total_booster_packs_opened = gs.total_booster_packs_opened.saturating_add(1);
 
     emit!(BoosterOpened {
         player: player.key(),
@@ -1395,7 +1450,7 @@ pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
     player.randomness_account = ctx.accounts.randomness_account_data.key();
     player.pending_action = PendingRandomAction::Gamble { amount };
 
-    // Optional SOL fee (0.01 SOL)
+    // Gamble SOL fee
     anchor_lang::system_program::transfer(
         CpiContext::new(
             ctx.accounts.system_program.to_account_info(),
@@ -1404,7 +1459,7 @@ pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
                 to: ctx.accounts.fees_wallet.to_account_info(),
             },
         ),
-        100_000_000, // 0.1 SOL
+        GAMBLE_FEE_LAMPORTS,
     )?;
 
     // Burn the gambling tokens immediately
@@ -1424,6 +1479,10 @@ pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
     // Increment total gambles counters
     player.total_gambles = player.total_gambles.saturating_add(1);
     gs.total_global_gambles = gs.total_global_gambles.saturating_add(1);
+
+    // Update player spending tracking
+    player.total_sol_spent = player.total_sol_spent.saturating_add(GAMBLE_FEE_LAMPORTS);
+    player.total_tokens_spent = player.total_tokens_spent.saturating_add(amount);
 
     msg!(
         "Gamble committed, randomness requested for amount: {}",
@@ -1612,6 +1671,9 @@ pub fn recycle_cards_commit(
     player.commit_slot = randomness_data.seed_slot;
     player.randomness_account = ctx.accounts.randomness_account_data.key();
 
+    // Update recycling attempt tracking
+    gs.total_card_recycling_attempts = gs.total_card_recycling_attempts.saturating_add(1);
+
     Ok(())
 }
 
@@ -1743,6 +1805,13 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
     // Reset recycle state
     player.pending_action = PendingRandomAction::None;
     player.commit_slot = 0;
+
+    // Update tracking statistics
+    player.total_cards_recycled = player.total_cards_recycled.saturating_add(10);
+    if success {
+        player.successful_card_recycling = player.successful_card_recycling.saturating_add(1);
+        gs.total_successful_card_recycling = gs.total_successful_card_recycling.saturating_add(1);
+    }
 
     emit!(CardsRecycled {
         player: player.key(),

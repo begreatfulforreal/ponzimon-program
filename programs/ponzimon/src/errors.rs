@@ -70,6 +70,8 @@ pub enum PonzimonError {
     CardIsStaked,
     #[msg("This card is not staked.")]
     CardNotStaked,
+    #[msg("This card is pending recycling and cannot be used.")]
+    CardPendingRecycling,
     #[msg("Player already has a pending booster pack request.")]
     BoosterAlreadyPending,
     #[msg("Player does not have a pending booster pack to settle.")]

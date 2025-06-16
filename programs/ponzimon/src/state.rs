@@ -33,6 +33,11 @@ pub struct GlobalState {
     /* ── gambling stats ───────────────────────── */
     pub total_global_gambles: u64, // Total number of gambles across all players
     pub total_global_gamble_wins: u64, // Total number of wins across all players
+
+    /* ── booster pack stats ──────────────────────── */
+    pub total_booster_packs_opened: u64, // Total number of booster packs opened
+    pub total_card_recycling_attempts: u64, // Total number of card recycling attempts
+    pub total_successful_card_recycling: u64, // Total number of successful card recycling
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
@@ -69,6 +74,25 @@ pub struct Player {
     pub pending_action: PendingRandomAction,
     pub randomness_account: Pubkey, // Reference to the Switchboard randomness account
     pub commit_slot: u64,           // The slot at which the randomness was committed
+
+    /* ── additional player stats ──────────────────────── */
+    pub total_earnings_for_referrer: u64, // Total tokens this player generated for their referrer
+    pub total_booster_packs_opened: u64,  // Total booster packs opened by this player
+    pub total_cards_recycled: u64,        // Total cards recycled by this player
+    pub successful_card_recycling: u64,   // Successful card recycling attempts
+    pub total_sol_spent: u64,             // Total SOL spent by this player (in lamports)
+    pub total_tokens_spent: u64,          // Total tokens spent by this player (in microtokens)
+}
+
+impl Player {
+    /// Check if a card index is pending recycling
+    pub fn is_card_pending_recycling(&self, index: u8) -> bool {
+        if let PendingRandomAction::Recycle { indices } = &self.pending_action {
+            indices.contains(&index)
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
