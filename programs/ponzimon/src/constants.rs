@@ -12,7 +12,7 @@ pub const MAX_FARM_TYPE: u8 = 10; // Maximum valid farm type
 
 // Fee constants
 pub const INITIAL_FARM_PURCHASE_FEE_LAMPORTS: u64 = 300_000_000; // 0.3 SOL in lamports
-pub const BOOSTER_PACK_COST_MICROTOKENS: u64 = 10_000_000; // 10 tokens in microtokens
+pub const BOOSTER_PACK_COST_MICROTOKENS: u64 = 100_000_000; // 10 tokens in microtokens
 pub const GAMBLE_FEE_LAMPORTS: u64 = 100_000_000; // 0.1 SOL in lamports
 
 // Card Rarities (matching TypeScript CardRarity enum)

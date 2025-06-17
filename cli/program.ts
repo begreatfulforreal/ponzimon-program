@@ -74,7 +74,7 @@ async function mintToken(
   keypairPath: string,
   network: string,
   mintKeypairPath?: string,
-  amount: bigint = 210_000_000000n
+  amount: bigint = 100_000_000_000_000n // 100 million tokens
 ) {
   if (!keypairPath) {
     console.error("Please provide path to keypair file as argument");
@@ -595,7 +595,7 @@ program
   .option(
     "-a, --amount <number>",
     "Amount to mint to the owner (in whole tokens, default: 210000)",
-    "210000"
+    "150000000"
   )
   .option(
     "-n, --network <url>",
