@@ -411,7 +411,7 @@ pub struct PurchaseInitialFarm<'info> {
     pub fees_wallet: AccountInfo<'info>,
     /// CHECK: This is the referrer's wallet. Optional. If provided, the wallet key is used as the referrer.
     #[account(mut)]
-    pub referrer_wallet: Option<UncheckedAccount<'info>>,
+    pub referrer_wallet: Option<SystemAccount<'info>>,
     #[account(
         mut,
         constraint = token_mint.key() == global_state.token_mint @ PonzimonError::InvalidTokenMint
