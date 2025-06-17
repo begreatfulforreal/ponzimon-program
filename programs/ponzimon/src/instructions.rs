@@ -71,12 +71,13 @@ impl Player {
             self.cards[i] = self.cards[i + 1];
         }
 
+        // Update bitset - shift down any staked cards that were after the removed card
+        let original_card_count = self.card_count;
+
         // Clear the last slot (set to default/zero values)
         self.cards[(self.card_count - 1) as usize] = Card::default();
         self.card_count -= 1;
 
-        // Update bitset - shift down any staked cards that were after the removed card
-        let original_card_count = self.card_count;
         let mut new_bitset = 0u64;
 
         for i in 0..original_card_count {

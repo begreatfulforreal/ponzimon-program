@@ -246,10 +246,7 @@ async function initializeProgram(
     console.log("GLOBAL_STATE_KEY =", globalStateKey.toString());
     console.log("TOKEN_MINT =", tokenMint.toString());
     console.log("FEES_WALLET =", feesWallet.toString());
-    console.log(
-      "FEES_TOKEN_ACCOUNT =",
-      feesTokenAccount.toString()
-    );
+    console.log("FEES_TOKEN_ACCOUNT =", feesTokenAccount.toString());
   } catch (error) {
     console.error("Error:", error);
     process.exit(1);
@@ -295,7 +292,7 @@ async function updateParameters(
       program.programId
     );
 
-    console.log("Updating parameters...");
+    console.log("Updating parameters... cooldownSlots", cooldownSlots);
     const tx = await program.methods
       .updateParameters(
         referralFee,
