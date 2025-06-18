@@ -54,6 +54,9 @@ pub struct GlobalState {
     pub last_staking_reward_slot: u64,
     pub token_reward_rate: u64,   // per slot
     pub total_sol_deposited: u64, // Track total SOL ever deposited for rewards
+
+    /* ── future expansion ───────────────────────── */
+    pub padding: [u8; 64], // Reserved space for future fields
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
@@ -111,6 +114,9 @@ pub struct Player {
     pub last_acc_sol_rewards_per_token: u128, // Track user's last SOL accumulator checkpoint
     pub last_acc_token_rewards_per_token: u128,
     pub claimed_token_rewards: u64,
+
+    /* ── future expansion ───────────────────────── */
+    pub padding: [u8; 64], // Reserved space for future fields
 }
 
 impl Player {

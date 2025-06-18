@@ -59,6 +59,21 @@ impl Player {
         Ok(())
     }
 
+    pub fn is_card_being_recycled(&self, card_index: u8) -> bool {
+        if let PendingRandomAction::Recycle {
+            card_indices,
+            card_count,
+        } = &self.pending_action
+        {
+            for i in 0..*card_count {
+                if card_indices[i as usize] == card_index {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub fn remove_card(&mut self, index: u8) -> Result<()> {
         let index_usize = index as usize;
         require!(
@@ -323,7 +338,8 @@ pub struct InitializeProgram<'info> {
         + 8 + 8                 /* total_berries + total_hashpower */
         + 8 + 8                 /* total_global_gambles + total_global_gamble_wins */
         + 8 + 8 + 8             /* total_booster_packs_opened + total_card_recycling_attempts + total_successful_card_recycling */
-        + 32 + 8 + 8 + 16 + 16 + 8 + 8 + 8, /* staking: sol_rewards_wallet + total_staked_tokens + staking_lockup_slots + acc_sol_rewards_per_token + acc_token_rewards_per_token + last_staking_reward_slot + token_reward_rate + total_sol_deposited */
+        + 32 + 8 + 8 + 16 + 16 + 8 + 8 + 8 /* staking: sol_rewards_wallet + total_staked_tokens + staking_lockup_slots + acc_sol_rewards_per_token + acc_token_rewards_per_token + last_staking_reward_slot + token_reward_rate + total_sol_deposited */
+        + 64, /* padding for future expansion */
         seeds=[GLOBAL_STATE_SEED, token_mint.key().as_ref()],
         bump
     )]
@@ -727,6 +743,12 @@ pub fn discard_card(ctx: Context<DiscardCard>, card_index: u8) -> Result<()> {
         PonzimonError::CardIsStaked
     );
 
+    // Ensure the card is not currently being recycled
+    require!(
+        !player.is_card_being_recycled(card_index),
+        PonzimonError::CardIsStaked // Reusing this error for consistency
+    );
+
     settle_and_mint_rewards(
         player,
         gs,
@@ -792,6 +814,12 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
     require!(
         !player.is_card_staked(card_index),
         PonzimonError::CardIsStaked // Using for "already staked"
+    );
+
+    // Ensure the card is not currently being recycled
+    require!(
+        !player.is_card_being_recycled(card_index),
+        PonzimonError::CardIsStaked // Reusing this error for consistency
     );
 
     require!(
@@ -871,6 +899,12 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
     require!(
         player.is_card_staked(card_index),
         PonzimonError::CardNotStaked
+    );
+
+    // Ensure the card is not currently being recycled
+    require!(
+        !player.is_card_being_recycled(card_index),
+        PonzimonError::CardIsStaked // Reusing this error for consistency
     );
 
     let card = &player.cards[card_index as usize];

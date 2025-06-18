@@ -39,6 +39,9 @@ import { base58 } from "@metaplex-foundation/umi/serializers";
 
 const GLOBAL_STATE_SEED = "global_state";
 const GOVERNANCE_TOKEN_SEED = "governance_token";
+const STAKING_VAULT_SEED = "staking_vault";
+const SOL_REWARDS_WALLET_SEED = "sol_rewards_wallet";
+
 // Add metadata configuration
 const TOKEN_METADATA = {
   name: "testing",
@@ -168,7 +171,10 @@ async function initializeProgram(
   totalSupplyArg: string,
   initialRewardRateArg: string,
   cooldownSlotsArg: string,
-  network: string
+  network: string,
+  gambleFeeLamportsArg: string = "100000000",
+  stakingLockupSlotsArg: string = "432000",
+  tokenRewardRateArg: string = "1000000"
 ) {
   if (!keypairPath || !mintPubkey || !feesWalletAddress) {
     console.error(
@@ -215,24 +221,46 @@ async function initializeProgram(
       ASSOCIATED_TOKEN_PROGRAM_ID
     );
 
+    // Derive SOL rewards wallet and staking vault
+    const [solRewardsWallet] = PublicKey.findProgramAddressSync(
+      [Buffer.from(SOL_REWARDS_WALLET_SEED), tokenMint.toBuffer()],
+      program.programId
+    );
+    const [stakingVault] = PublicKey.findProgramAddressSync(
+      [Buffer.from(STAKING_VAULT_SEED), tokenMint.toBuffer()],
+      program.programId
+    );
+
     console.log("Initializing program...", totalSupplyArg);
     const HALVING_INTERVAL = new BN(halvingIntervalArg);
     const TOTAL_SUPPLY = new BN(Number(totalSupplyArg) * 10 ** TOKEN_DECIMALS);
     const INITIAL_REWARD_RATE = new BN(initialRewardRateArg);
     const COOLDOWN_SLOTS = new BN(cooldownSlotsArg);
+    const initialFarmPurchaseFeeLamports = new BN(0);
+    const boosterPackCostMicrotokens = new BN(0);
+    const gambleFeeLamports = new BN(gambleFeeLamportsArg);
+    const stakingLockupSlots = new BN(stakingLockupSlotsArg);
+    const tokenRewardRate = new BN(tokenRewardRateArg);
     const tx = await program.methods
       .initializeProgram(
         currentSlot,
         HALVING_INTERVAL,
         TOTAL_SUPPLY,
         INITIAL_REWARD_RATE,
-        COOLDOWN_SLOTS
+        COOLDOWN_SLOTS,
+        initialFarmPurchaseFeeLamports,
+        boosterPackCostMicrotokens,
+        gambleFeeLamports,
+        stakingLockupSlots,
+        tokenRewardRate
       )
       .accountsStrict({
         globalState: globalStateKey,
         authority: wallet.publicKey,
         feesWallet: feesWallet,
+        solRewardsWallet: solRewardsWallet,
         feesTokenAccount: feesTokenAccount,
+        stakingVault: stakingVault,
         tokenMint: tokenMint,
         tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,

@@ -1,7 +1,7 @@
-pub const GLOBAL_STATE_SEED: &[u8] = b"global-state";
+pub const GLOBAL_STATE_SEED: &[u8] = b"global_state";
 pub const PLAYER_SEED: &[u8] = b"player";
-pub const STAKING_VAULT_SEED: &[u8] = b"staking-vault";
-pub const SOL_REWARDS_WALLET_SEED: &[u8] = b"sol-rewards-wallet";
+pub const STAKING_VAULT_SEED: &[u8] = b"staking_vault";
+pub const SOL_REWARDS_WALLET_SEED: &[u8] = b"sol_rewards_wallet";
 
 // Fixed variables
 pub const ACC_SCALE: u128 = 1_000_000_000_000; // 1e12
