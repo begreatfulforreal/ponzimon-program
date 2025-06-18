@@ -100,4 +100,12 @@ pub enum PonzimonError {
     InvalidFarmTypeForOperation,
     #[msg("Program does not have mint authority over the token")]
     InvalidMintAuthority,
+
+    // New error variants for staking feature
+    #[msg("Amount must be greater than zero.")]
+    ZeroAmount,
+    #[msg("Insufficient staked amount.")]
+    InsufficientStake,
+    #[msg("Staked tokens are locked.")]
+    StakeLocked,
 }

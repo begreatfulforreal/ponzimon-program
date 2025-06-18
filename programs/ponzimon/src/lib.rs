@@ -29,6 +29,8 @@ pub mod ponzimon {
         initial_farm_purchase_fee_lamports: Option<u64>,
         booster_pack_cost_microtokens: Option<u64>,
         gamble_fee_lamports: Option<u64>,
+        staking_lockup_slots: u64,
+        token_reward_rate: u64,
     ) -> Result<()> {
         instructions::initialize_program(
             ctx,
@@ -40,6 +42,8 @@ pub mod ponzimon {
             initial_farm_purchase_fee_lamports,
             booster_pack_cost_microtokens,
             gamble_fee_lamports,
+            staking_lockup_slots,
+            token_reward_rate,
         )
     }
     /// ────────────────────────────────────────────────────────────────────────────
@@ -53,6 +57,9 @@ pub mod ponzimon {
     }
     pub fn update_pool_manual(ctx: Context<UpdatePool>) -> Result<()> {
         instructions::update_pool_manual(ctx)
+    }
+    pub fn update_sol_rewards(ctx: Context<UpdateSolRewards>) -> Result<()> {
+        instructions::update_sol_rewards(ctx)
     }
     pub fn update_parameters(
         ctx: Context<UpdateParameters>,
@@ -123,6 +130,18 @@ pub mod ponzimon {
 
     pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
         instructions::recycle_cards_settle(ctx)
+    }
+
+    pub fn stake_tokens(ctx: Context<StakeTokens>, amount: u64) -> Result<()> {
+        instructions::stake_tokens(ctx, amount)
+    }
+
+    pub fn unstake_tokens(ctx: Context<UnstakeTokens>, amount: u64) -> Result<()> {
+        instructions::unstake_tokens(ctx, amount)
+    }
+
+    pub fn claim_staking_rewards(ctx: Context<ClaimStakingRewards>) -> Result<()> {
+        instructions::claim_staking_rewards(ctx)
     }
 }
 

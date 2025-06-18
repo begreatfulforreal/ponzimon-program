@@ -193,6 +193,36 @@ fn update_pool(gs: &mut GlobalState, slot_now: u64) {
     gs.last_processed_halvings = halvings;
 }
 
+fn update_staking_pool(gs: &mut GlobalState, slot_now: u64) {
+    if slot_now <= gs.last_staking_reward_slot {
+        gs.last_staking_reward_slot = slot_now;
+        return;
+    }
+    if gs.total_staked_tokens == 0 {
+        gs.last_staking_reward_slot = slot_now;
+        return;
+    }
+
+    let slots_elapsed = (slot_now.saturating_sub(gs.last_staking_reward_slot)) as u128;
+
+    // SOL rewards are now pool-based - no accumulation here
+    // The SOL balance will be checked during claims from the sol_rewards_wallet
+
+    // Token rewards continue with emission-based system
+    let token_reward = slots_elapsed
+        .checked_mul(gs.token_reward_rate as u128)
+        .unwrap_or(u128::MAX);
+    if token_reward > 0 {
+        gs.acc_token_rewards_per_token = gs.acc_token_rewards_per_token.saturating_add(
+            token_reward
+                .saturating_mul(ACC_SCALE)
+                .saturating_div(gs.total_staked_tokens as u128),
+        );
+    }
+
+    gs.last_staking_reward_slot = slot_now;
+}
+
 /// Helper to settle and mint rewards for a player.
 /// Returns Ok(amount_claimed) or Ok(0) if nothing to claim.
 fn settle_and_mint_rewards<'info>(
@@ -292,13 +322,24 @@ pub struct InitializeProgram<'info> {
         + 8 + 8 + 8             /* initial_farm_purchase_fee_lamports + booster_pack_cost_microtokens + gamble_fee_lamports */
         + 8 + 8                 /* total_berries + total_hashpower */
         + 8 + 8                 /* total_global_gambles + total_global_gamble_wins */
-        + 8 + 8 + 8,            /* total_booster_packs_opened + total_card_recycling_attempts + total_successful_card_recycling */
+        + 8 + 8 + 8             /* total_booster_packs_opened + total_card_recycling_attempts + total_successful_card_recycling */
+        + 32 + 8 + 8 + 16 + 16 + 8 + 8 + 8, /* staking: sol_rewards_wallet + total_staked_tokens + staking_lockup_slots + acc_sol_rewards_per_token + acc_token_rewards_per_token + last_staking_reward_slot + token_reward_rate + total_sol_deposited */
         seeds=[GLOBAL_STATE_SEED, token_mint.key().as_ref()],
         bump
     )]
     pub global_state: Account<'info, GlobalState>,
     /// CHECK: This is the fees recipient wallet
     pub fees_wallet: AccountInfo<'info>,
+    /// CHECK: This is a PDA for holding SOL rewards
+    #[account(
+        init,
+        payer = authority,
+        seeds = [SOL_REWARDS_WALLET_SEED, token_mint.key().as_ref()],
+        bump,
+        space = 8
+    )]
+    pub sol_rewards_wallet: AccountInfo<'info>,
+
     #[account(
         init_if_needed,
         payer = authority,
@@ -306,6 +347,15 @@ pub struct InitializeProgram<'info> {
         associated_token::authority = fees_wallet,
     )]
     pub fees_token_account: Account<'info, TokenAccount>,
+    #[account(
+        init,
+        payer = authority,
+        token::mint = token_mint,
+        token::authority = global_state,
+        seeds = [STAKING_VAULT_SEED, token_mint.key().as_ref()],
+        bump
+    )]
+    pub staking_vault: Account<'info, TokenAccount>,
     #[account(
         constraint = token_mint.mint_authority.unwrap() == global_state.key() @ PonzimonError::InvalidMintAuthority
     )]
@@ -326,6 +376,8 @@ pub fn initialize_program(
     initial_farm_purchase_fee_lamports: Option<u64>,
     booster_pack_cost_microtokens: Option<u64>,
     gamble_fee_lamports: Option<u64>,
+    staking_lockup_slots: u64,
+    token_reward_rate: u64,
 ) -> Result<()> {
     let gs = &mut ctx.accounts.global_state;
 
@@ -366,6 +418,16 @@ pub fn initialize_program(
     gs.total_card_recycling_attempts = 0;
     gs.total_successful_card_recycling = 0;
 
+    // Staking pool
+    gs.sol_rewards_wallet = ctx.accounts.sol_rewards_wallet.key();
+    gs.total_staked_tokens = 0;
+    gs.staking_lockup_slots = staking_lockup_slots;
+    gs.acc_sol_rewards_per_token = 0;
+    gs.acc_token_rewards_per_token = 0;
+    gs.last_staking_reward_slot = start_slot;
+    gs.token_reward_rate = token_reward_rate;
+    gs.total_sol_deposited = 0;
+
     Ok(())
 }
 
@@ -386,6 +448,7 @@ pub struct PurchaseInitialFarm<'info> {
             + 1        // card_count: u8
             + 8        // staked_cards_bitset: u64
             + 8        // berries: u64
+            + 8        // total_hashpower: u64
             + 33       // referrer: Option<Pubkey> (1+32)
             + 16       // last_acc_tokens_per_hashpower: u128
             + 8        // last_claim_slot: u64
@@ -403,7 +466,8 @@ pub struct PurchaseInitialFarm<'info> {
             + 8        // total_cards_recycled: u64
             + 8        // successful_card_recycling: u64
             + 8        // total_sol_spent: u64
-            + 8,       // total_tokens_spent: u64
+            + 8        // total_tokens_spent: u64
+            + 8 + 8 + 16 + 16 + 8, // Staking stats: staked_tokens + last_stake_slot + last_acc_sol_rewards_per_token + last_acc_token_rewards_per_token + claimed_token_rewards
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -422,7 +486,7 @@ pub struct PurchaseInitialFarm<'info> {
     pub fees_wallet: AccountInfo<'info>,
     /// CHECK: This is the referrer's wallet. Optional. If provided, the wallet key is used as the referrer.
     #[account(mut)]
-    pub referrer_wallet: Option<SystemAccount<'info>>,
+    pub referrer_wallet: Option<AccountInfo<'info>>,
     #[account(
         mut,
         constraint = token_mint.key() == global_state.token_mint @ PonzimonError::InvalidTokenMint
@@ -585,6 +649,13 @@ pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
     player.successful_card_recycling = 0;
     player.total_sol_spent = gs.initial_farm_purchase_fee_lamports;
     player.total_tokens_spent = 0;
+
+    // Initialize staking stats
+    player.staked_tokens = 0;
+    player.last_stake_slot = 0;
+    player.last_acc_sol_rewards_per_token = 0;
+    player.last_acc_token_rewards_per_token = 0;
+    player.claimed_token_rewards = 0;
 
     // global stats (Effect) - no initial berry consumption since cards aren't staked
     // gs.total_berries += 0; // No change needed
@@ -997,6 +1068,392 @@ pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
         &ctx.accounts.token_program.to_account_info(),
         ctx.bumps.global_state,
     )?;
+
+    Ok(())
+}
+
+/// ────────────────────────────────────────────────────────────────────────────
+///  STAKING INSTRUCTIONS
+/// ────────────────────────────────────────────────────────────────────────────
+#[derive(Accounts)]
+pub struct StakeTokens<'info> {
+    #[account(mut)]
+    pub player_wallet: Signer<'info>,
+    #[account(
+        mut,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        bump
+    )]
+    pub player: Box<Account<'info, Player>>,
+    #[account(
+        mut,
+        seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        constraint = player_token_account.owner == player_wallet.key(),
+        constraint = player_token_account.mint == global_state.token_mint
+    )]
+    pub player_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(
+        mut,
+        seeds = [STAKING_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub staking_vault: Box<Account<'info, TokenAccount>>,
+    /// CHECK: This is a PDA for holding SOL rewards
+    #[account(
+        mut,
+        seeds = [SOL_REWARDS_WALLET_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub sol_rewards_wallet: AccountInfo<'info>,
+    #[account(mut)]
+    pub token_mint: Account<'info, Mint>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn stake_tokens(ctx: Context<StakeTokens>, amount: u64) -> Result<()> {
+    let now = Clock::get()?.slot;
+    let player = &mut ctx.accounts.player;
+    let gs = &mut ctx.accounts.global_state;
+
+    require!(amount > 0, PonzimonError::ZeroAmount);
+
+    // Settle pending rewards before staking more tokens
+    update_staking_pool(gs, now);
+
+    // Calculate and accumulate pending SOL rewards
+    let pending_sol = ((player.staked_tokens as u128)
+        .checked_mul(
+            gs.acc_sol_rewards_per_token
+                .saturating_sub(player.last_acc_sol_rewards_per_token),
+        )
+        .unwrap_or(0)
+        / ACC_SCALE) as u64;
+
+    let pending_tokens = ((player.staked_tokens as u128)
+        .checked_mul(
+            gs.acc_token_rewards_per_token
+                .saturating_sub(player.last_acc_token_rewards_per_token),
+        )
+        .unwrap_or(0)
+        / ACC_SCALE) as u64;
+
+    // Transfer pending SOL rewards to user before staking more
+    if pending_sol > 0 {
+        let token_mint_key = ctx.accounts.token_mint.key();
+        let sol_rewards_wallet_seeds = &[
+            SOL_REWARDS_WALLET_SEED,
+            token_mint_key.as_ref(),
+            &[ctx.bumps.sol_rewards_wallet],
+        ];
+        let sol_rewards_wallet_signer = &[&sol_rewards_wallet_seeds[..]];
+
+        let sol_transfer_ix = anchor_lang::solana_program::system_instruction::transfer(
+            &ctx.accounts.sol_rewards_wallet.key(),
+            &ctx.accounts.player_wallet.key(),
+            pending_sol,
+        );
+
+        anchor_lang::solana_program::program::invoke_signed(
+            &sol_transfer_ix,
+            &[
+                ctx.accounts.sol_rewards_wallet.to_account_info(),
+                ctx.accounts.player_wallet.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+            sol_rewards_wallet_signer,
+        )?;
+    }
+
+    // Accumulate token rewards to be claimed later (tokens use accumulated claiming)
+    player.claimed_token_rewards = player.claimed_token_rewards.saturating_add(pending_tokens);
+
+    // Transfer tokens to the staking vault
+    token::transfer(
+        CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.player_token_account.to_account_info(),
+                to: ctx.accounts.staking_vault.to_account_info(),
+                authority: ctx.accounts.player_wallet.to_account_info(),
+            },
+        ),
+        amount,
+    )?;
+
+    // Update state
+    gs.total_staked_tokens = gs.total_staked_tokens.saturating_add(amount);
+    player.staked_tokens = player.staked_tokens.saturating_add(amount);
+    player.last_stake_slot = now;
+    player.last_acc_sol_rewards_per_token = gs.acc_sol_rewards_per_token;
+    player.last_acc_token_rewards_per_token = gs.acc_token_rewards_per_token;
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct UnstakeTokens<'info> {
+    #[account(mut)]
+    pub player_wallet: Signer<'info>,
+    #[account(
+        mut,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        bump
+    )]
+    pub player: Box<Account<'info, Player>>,
+    #[account(
+        mut,
+        seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
+        bump
+    )]
+    pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        constraint = player_token_account.owner == player_wallet.key(),
+        constraint = player_token_account.mint == global_state.token_mint
+    )]
+    pub player_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(
+        mut,
+        seeds = [STAKING_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub staking_vault: Box<Account<'info, TokenAccount>>,
+    /// CHECK: This is a PDA for holding SOL rewards
+    #[account(
+        mut,
+        seeds = [SOL_REWARDS_WALLET_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub sol_rewards_wallet: AccountInfo<'info>,
+    #[account(mut)]
+    pub token_mint: Account<'info, Mint>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn unstake_tokens(ctx: Context<UnstakeTokens>, amount: u64) -> Result<()> {
+    let now = Clock::get()?.slot;
+    let player = &mut ctx.accounts.player;
+    let gs = &mut ctx.accounts.global_state;
+
+    require!(amount > 0, PonzimonError::ZeroAmount);
+    require!(
+        player.staked_tokens >= amount,
+        PonzimonError::InsufficientStake
+    );
+    require!(
+        now >= player.last_stake_slot + gs.staking_lockup_slots,
+        PonzimonError::StakeLocked
+    );
+
+    // Settle pending rewards
+    update_staking_pool(gs, now);
+
+    // Calculate pending SOL rewards (but don't accumulate them)
+    let pending_sol = ((player.staked_tokens as u128)
+        .checked_mul(
+            gs.acc_sol_rewards_per_token
+                .saturating_sub(player.last_acc_sol_rewards_per_token),
+        )
+        .unwrap_or(0)
+        / ACC_SCALE) as u64;
+
+    let pending_tokens = ((player.staked_tokens as u128)
+        .checked_mul(
+            gs.acc_token_rewards_per_token
+                .saturating_sub(player.last_acc_token_rewards_per_token),
+        )
+        .unwrap_or(0)
+        / ACC_SCALE) as u64;
+
+    player.claimed_token_rewards = player.claimed_token_rewards.saturating_add(pending_tokens);
+
+    // Transfer SOL rewards to user (must claim on unstake!)
+    if pending_sol > 0 {
+        let token_mint_key = ctx.accounts.token_mint.key();
+        let sol_rewards_wallet_seeds = &[
+            SOL_REWARDS_WALLET_SEED,
+            token_mint_key.as_ref(),
+            &[ctx.bumps.sol_rewards_wallet],
+        ];
+        let sol_rewards_wallet_signer = &[&sol_rewards_wallet_seeds[..]];
+
+        let sol_transfer_ix = anchor_lang::solana_program::system_instruction::transfer(
+            &ctx.accounts.sol_rewards_wallet.key(),
+            &ctx.accounts.player_wallet.key(),
+            pending_sol,
+        );
+
+        anchor_lang::solana_program::program::invoke_signed(
+            &sol_transfer_ix,
+            &[
+                ctx.accounts.sol_rewards_wallet.to_account_info(),
+                ctx.accounts.player_wallet.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+            sol_rewards_wallet_signer,
+        )?;
+    }
+
+    // Transfer tokens from vault
+    let token_mint_key = ctx.accounts.token_mint.key();
+    let seeds = &[
+        GLOBAL_STATE_SEED,
+        token_mint_key.as_ref(),
+        &[ctx.bumps.global_state],
+    ];
+    let signer = &[&seeds[..]];
+
+    token::transfer(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from: ctx.accounts.staking_vault.to_account_info(),
+                to: ctx.accounts.player_token_account.to_account_info(),
+                authority: gs.to_account_info(),
+            },
+            signer,
+        ),
+        amount,
+    )?;
+
+    // Update state
+    gs.total_staked_tokens = gs.total_staked_tokens.saturating_sub(amount);
+    player.staked_tokens = player.staked_tokens.saturating_sub(amount);
+    player.last_acc_sol_rewards_per_token = gs.acc_sol_rewards_per_token;
+    player.last_acc_token_rewards_per_token = gs.acc_token_rewards_per_token;
+
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct ClaimStakingRewards<'info> {
+    #[account(mut)]
+    pub player_wallet: Signer<'info>,
+    #[account(
+        mut,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        bump
+    )]
+    pub player: Box<Account<'info, Player>>,
+    #[account(
+        mut,
+        seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
+        bump
+    )]
+    pub global_state: Account<'info, GlobalState>,
+    /// CHECK: This is a PDA for holding SOL rewards
+    #[account(
+        mut,
+        seeds = [SOL_REWARDS_WALLET_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub sol_rewards_wallet: AccountInfo<'info>,
+
+    #[account(
+        mut,
+        constraint = player_token_account.owner == player_wallet.key(),
+        constraint = player_token_account.mint == global_state.token_mint
+    )]
+    pub player_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub token_mint: Account<'info, Mint>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn claim_staking_rewards(ctx: Context<ClaimStakingRewards>) -> Result<()> {
+    let now = Clock::get()?.slot;
+    let player = &mut ctx.accounts.player;
+    let gs = &mut ctx.accounts.global_state;
+
+    require!(player.staked_tokens > 0, PonzimonError::InsufficientStake);
+
+    update_staking_pool(gs, now);
+
+    // Calculate SOL rewards using accumulator system (similar to token rewards)
+    let pending_sol = ((player.staked_tokens as u128)
+        .checked_mul(
+            gs.acc_sol_rewards_per_token
+                .saturating_sub(player.last_acc_sol_rewards_per_token),
+        )
+        .unwrap_or(0)
+        / ACC_SCALE) as u64;
+
+    // Calculate token rewards (emissions-based)
+    let pending_tokens = ((player.staked_tokens as u128)
+        .checked_mul(
+            gs.acc_token_rewards_per_token
+                .saturating_sub(player.last_acc_token_rewards_per_token),
+        )
+        .unwrap_or(0)
+        / ACC_SCALE) as u64;
+
+    let tokens_to_claim = player.claimed_token_rewards.saturating_add(pending_tokens);
+
+    let token_mint_key = ctx.accounts.token_mint.key();
+    let seeds = &[
+        GLOBAL_STATE_SEED,
+        token_mint_key.as_ref(),
+        &[ctx.bumps.global_state],
+    ];
+    let signer = &[&seeds[..]];
+
+    // Transfer SOL rewards from pool
+    if pending_sol > 0 {
+        let sol_rewards_wallet_seeds = &[
+            SOL_REWARDS_WALLET_SEED,
+            token_mint_key.as_ref(),
+            &[ctx.bumps.sol_rewards_wallet],
+        ];
+        let sol_rewards_wallet_signer = &[&sol_rewards_wallet_seeds[..]];
+
+        let sol_transfer_ix = anchor_lang::solana_program::system_instruction::transfer(
+            &ctx.accounts.sol_rewards_wallet.key(),
+            &ctx.accounts.player_wallet.key(),
+            pending_sol,
+        );
+
+        anchor_lang::solana_program::program::invoke_signed(
+            &sol_transfer_ix,
+            &[
+                ctx.accounts.sol_rewards_wallet.to_account_info(),
+                ctx.accounts.player_wallet.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+            sol_rewards_wallet_signer,
+        )?;
+    }
+
+    // Mint token rewards (emissions)
+    if tokens_to_claim > 0 {
+        token::mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                MintTo {
+                    mint: ctx.accounts.token_mint.to_account_info(),
+                    to: ctx.accounts.player_token_account.to_account_info(),
+                    authority: gs.to_account_info(),
+                },
+                signer,
+            ),
+            tokens_to_claim,
+        )?;
+        player.claimed_token_rewards = 0;
+    }
+
+    // Update player's accumulator checkpoints
+    player.last_acc_sol_rewards_per_token = gs.acc_sol_rewards_per_token;
+    player.last_acc_token_rewards_per_token = gs.acc_token_rewards_per_token;
 
     Ok(())
 }
@@ -1876,6 +2333,62 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
         success,
         new_card_id,
     });
+
+    Ok(())
+}
+
+/// ────────────────────────────────────────────────────────────────────────────
+///  ADMIN: UPDATE SOL REWARDS POOL
+/// ────────────────────────────────────────────────────────────────────────────
+#[derive(Accounts)]
+pub struct UpdateSolRewards<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        has_one = authority @ PonzimonError::Unauthorized,
+        seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub global_state: Account<'info, GlobalState>,
+    /// CHECK: This is a PDA for holding SOL rewards
+    #[account(
+        mut,
+        seeds = [SOL_REWARDS_WALLET_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub sol_rewards_wallet: AccountInfo<'info>,
+    pub token_mint: Account<'info, Mint>,
+}
+
+pub fn update_sol_rewards(ctx: Context<UpdateSolRewards>) -> Result<()> {
+    let gs = &mut ctx.accounts.global_state;
+
+    // Get current SOL balance in the rewards wallet
+    let current_balance = ctx.accounts.sol_rewards_wallet.lamports();
+
+    // Calculate how much new SOL was deposited
+    let new_sol_deposited = current_balance.saturating_sub(
+        gs.total_sol_deposited.saturating_sub(
+            // Subtract any SOL that was already claimed/distributed
+            gs.acc_sol_rewards_per_token
+                .saturating_mul(gs.total_staked_tokens as u128)
+                .saturating_div(ACC_SCALE) as u64,
+        ),
+    );
+
+    if new_sol_deposited > 0 && gs.total_staked_tokens > 0 {
+        // Update the SOL accumulator - distribute new SOL proportionally
+        let new_sol_per_token = (new_sol_deposited as u128)
+            .saturating_mul(ACC_SCALE)
+            .saturating_div(gs.total_staked_tokens as u128);
+
+        gs.acc_sol_rewards_per_token = gs
+            .acc_sol_rewards_per_token
+            .saturating_add(new_sol_per_token);
+
+        gs.total_sol_deposited = gs.total_sol_deposited.saturating_add(new_sol_deposited);
+    }
 
     Ok(())
 }

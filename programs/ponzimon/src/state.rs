@@ -44,6 +44,16 @@ pub struct GlobalState {
     pub total_booster_packs_opened: u64, // Total number of booster packs opened
     pub total_card_recycling_attempts: u64, // Total number of card recycling attempts
     pub total_successful_card_recycling: u64, // Total number of successful card recycling
+
+    /* ── staking pool ───────────────────────────── */
+    pub sol_rewards_wallet: Pubkey,
+    pub total_staked_tokens: u64,
+    pub staking_lockup_slots: u64,
+    pub acc_sol_rewards_per_token: u128, // SOL deposited per staked token (scaled by ACC_SCALE)
+    pub acc_token_rewards_per_token: u128,
+    pub last_staking_reward_slot: u64,
+    pub token_reward_rate: u64,   // per slot
+    pub total_sol_deposited: u64, // Track total SOL ever deposited for rewards
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
@@ -94,6 +104,13 @@ pub struct Player {
     pub successful_card_recycling: u64,   // Successful card recycling attempts
     pub total_sol_spent: u64,             // Total SOL spent by this player (in lamports)
     pub total_tokens_spent: u64,          // Total tokens spent by this player (in microtokens)
+
+    /* ── staking stats ──────────────────────────── */
+    pub staked_tokens: u64,
+    pub last_stake_slot: u64,
+    pub last_acc_sol_rewards_per_token: u128, // Track user's last SOL accumulator checkpoint
+    pub last_acc_token_rewards_per_token: u128,
+    pub claimed_token_rewards: u64,
 }
 
 impl Player {
