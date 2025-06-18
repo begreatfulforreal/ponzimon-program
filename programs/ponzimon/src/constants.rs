@@ -10,10 +10,10 @@ pub const MAX_CARDS_PER_PLAYER: u8 = 200; // Maximum cards a player can have
 pub const MAX_STAKED_CARDS_PER_PLAYER: u8 = 25; // Maximum staked cards a player can have
 pub const MAX_FARM_TYPE: u8 = 10; // Maximum valid farm type
 
-// Fee constants
-pub const INITIAL_FARM_PURCHASE_FEE_LAMPORTS: u64 = 300_000_000; // 0.3 SOL in lamports
-pub const BOOSTER_PACK_COST_MICROTOKENS: u64 = 100_000_000; // 10 tokens in microtokens
-pub const GAMBLE_FEE_LAMPORTS: u64 = 100_000_000; // 0.1 SOL in lamports
+// Fee constants - MOVED TO GLOBAL STATE FOR CONFIGURABILITY
+// pub const INITIAL_FARM_PURCHASE_FEE_LAMPORTS: u64 = 300_000_000; // 0.3 SOL in lamports
+// pub const BOOSTER_PACK_COST_MICROTOKENS: u64 = 100_000_000; // 10 tokens in microtokens
+// pub const GAMBLE_FEE_LAMPORTS: u64 = 100_000_000; // 0.1 SOL in lamports
 
 // Card Rarities (matching TypeScript CardRarity enum)
 pub const COMMON: u8 = 0;
@@ -24,7 +24,7 @@ pub const VERY_RARE: u8 = 4; // Mapped from VeryRare
 pub const SUPER_RARE: u8 = 5; // Mapped from SuperRare
 pub const MEGA_RARE: u8 = 6; // Mapped from MegaRare
 
-// Initial starter card IDs from data.ts
+// Initial starter card IDs
 pub const STARTER_CARD_IDS: [u16; 3] = [179, 175, 147]; // Glowhare, Flitterfrog, Sunnyotter
 
 // === Farm configurations (matching farmList from data.ts) =================================================
@@ -45,7 +45,7 @@ pub const FARM_CONFIGS: [(u8, u64, u64); 11] = [
 ];
 
 // === Card data from pokemonCardList in data.ts ====================================================
-// format: (id, rarity, power, berry_consumption)
+// format: (id, rarity, hashpower, berry_consumption)
 // This is a comprehensive list of all 191 cards from the TypeScript data
 pub const CARD_DATA: [(u16, u8, u16, u8); 191] = [
     (1, MEGA_RARE, 98, 22),   // Zephyrdrake
@@ -246,5 +246,5 @@ pub fn get_card_by_id(id: u16) -> Option<(u8, u16, u8)> {
     CARD_DATA
         .iter()
         .find(|(card_id, _, _, _)| *card_id == id)
-        .map(|(_, rarity, power, berry_consumption)| (*rarity, *power, *berry_consumption))
+        .map(|(_, rarity, hashpower, berry_consumption)| (*rarity, *hashpower, *berry_consumption))
 }

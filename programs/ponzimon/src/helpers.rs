@@ -51,6 +51,20 @@ pub fn safe_sub_berries(current: u64, to_sub: u64) -> Result<u64> {
         .ok_or(PonzimonError::ArithmeticOverflow.into())
 }
 
+/// Safely adds hashpower to total, checking for overflow
+pub fn safe_add_hashpower(current: u64, to_add: u64) -> Result<u64> {
+    current
+        .checked_add(to_add)
+        .ok_or(PonzimonError::ArithmeticOverflow.into())
+}
+
+/// Safely subtracts hashpower from total, checking for underflow
+pub fn safe_sub_hashpower(current: u64, to_sub: u64) -> Result<u64> {
+    current
+        .checked_sub(to_sub)
+        .ok_or(PonzimonError::ArithmeticOverflow.into())
+}
+
 /// Validates minimum delay for randomness operations
 pub fn validate_randomness_delay(commit_slot: u64, current_slot: u64) -> Result<()> {
     require!(

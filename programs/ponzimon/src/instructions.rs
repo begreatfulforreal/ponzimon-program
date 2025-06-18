@@ -148,7 +148,7 @@ impl Player {
 /// INTERNAL: update the global accumulator
 /// ────────────────────────────────────────────────────────────────────────────
 fn update_pool(gs: &mut GlobalState, slot_now: u64) {
-    if slot_now <= gs.last_reward_slot || gs.total_berries == 0 {
+    if slot_now <= gs.last_reward_slot || gs.total_hashpower == 0 {
         gs.last_reward_slot = slot_now;
         return;
     }
@@ -184,7 +184,7 @@ fn update_pool(gs: &mut GlobalState, slot_now: u64) {
         .unwrap_or(u128::MAX);
     reward = reward.min(remaining_supply as u128); // clamp to cap
 
-    gs.acc_tokens_per_berry += reward * ACC_SCALE / gs.total_berries as u128;
+    gs.acc_tokens_per_hashpower += reward * ACC_SCALE / gs.total_hashpower as u128;
     gs.cumulative_rewards = gs.cumulative_rewards.saturating_add(reward as u64);
 
     gs.current_reward_rate = if remaining_supply > 0 { rate_now } else { 0 };
@@ -213,10 +213,10 @@ fn settle_and_mint_rewards<'info>(
     );
 
     // calculate pending
-    let pending_u128 = (player.berries as u128)
+    let pending_u128 = (player.total_hashpower as u128)
         .checked_mul(
-            gs.acc_tokens_per_berry
-                .saturating_sub(player.last_acc_tokens_per_berry),
+            gs.acc_tokens_per_hashpower
+                .saturating_sub(player.last_acc_tokens_per_hashpower),
         )
         .unwrap_or(u128::MAX)
         / ACC_SCALE;
@@ -231,13 +231,13 @@ fn settle_and_mint_rewards<'info>(
 
     if pending == 0 {
         player.last_claim_slot = now;
-        player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+        player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
         return Ok(0);
     }
 
     // update player bookkeeping
     player.last_claim_slot = now;
-    player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
     // Give the player their full rewards - no deduction for referrals
     let player_amount = pending;
@@ -289,7 +289,8 @@ pub struct InitializeProgram<'info> {
         + 8  + 8  + 8           /* halving_interval + last_halvings + initial_rate */
         + 8  + 16 + 8           /* current_rate + acc_tokens_per_berry (u128!) + last_reward_slot */
         + 1  + 1 + 1 + 8 + 8    /* burn_rate + referral_fee + prod + cooldown + dust_divisor */
-        + 8                     /* total_berries */
+        + 8 + 8 + 8             /* initial_farm_purchase_fee_lamports + booster_pack_cost_microtokens + gamble_fee_lamports */
+        + 8 + 8                 /* total_berries + total_hashpower */
         + 8 + 8                 /* total_global_gambles + total_global_gamble_wins */
         + 8 + 8 + 8,            /* total_booster_packs_opened + total_card_recycling_attempts + total_successful_card_recycling */
         seeds=[GLOBAL_STATE_SEED, token_mint.key().as_ref()],
@@ -322,6 +323,9 @@ pub fn initialize_program(
     total_supply: u64,
     initial_reward_rate: u64,
     cooldown_slots: Option<u64>,
+    initial_farm_purchase_fee_lamports: Option<u64>,
+    booster_pack_cost_microtokens: Option<u64>,
+    gamble_fee_lamports: Option<u64>,
 ) -> Result<()> {
     let gs = &mut ctx.accounts.global_state;
 
@@ -339,7 +343,7 @@ pub fn initialize_program(
     gs.initial_reward_rate = initial_reward_rate;
     gs.current_reward_rate = initial_reward_rate;
 
-    gs.acc_tokens_per_berry = 0;
+    gs.acc_tokens_per_hashpower = 0;
     gs.last_reward_slot = start_slot;
 
     gs.burn_rate = 75;
@@ -348,7 +352,14 @@ pub fn initialize_program(
     gs.cooldown_slots = cooldown_slots.unwrap_or(108_000); // 12 hours
     gs.dust_threshold_divisor = 1000; // Default to 0.1%
 
+    // Initialize fee configuration with defaults from constants
+    gs.initial_farm_purchase_fee_lamports =
+        initial_farm_purchase_fee_lamports.unwrap_or(300_000_000); // 0.3 SOL
+    gs.booster_pack_cost_microtokens = booster_pack_cost_microtokens.unwrap_or(100_000_000); // 10 tokens
+    gs.gamble_fee_lamports = gamble_fee_lamports.unwrap_or(100_000_000); // 0.1 SOL
+
     gs.total_berries = 0;
+    gs.total_hashpower = 0;
 
     // Initialize new tracking fields
     gs.total_booster_packs_opened = 0;
@@ -376,7 +387,7 @@ pub struct PurchaseInitialFarm<'info> {
             + 8        // staked_cards_bitset: u64
             + 8        // berries: u64
             + 33       // referrer: Option<Pubkey> (1+32)
-            + 16       // last_acc_tokens_per_berry: u128
+            + 16       // last_acc_tokens_per_hashpower: u128
             + 8        // last_claim_slot: u64
             + 8        // last_upgrade_slot: u64
             + 8        // total_rewards: u64
@@ -471,12 +482,14 @@ pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
     // --- Fee and Referral Logic ---
     if let Some(referrer_wallet) = &ctx.accounts.referrer_wallet {
         // A referrer is provided, so we split the fee into two transfers.
-        let referral_fee_lamports = INITIAL_FARM_PURCHASE_FEE_LAMPORTS
+        let referral_fee_lamports = gs
+            .initial_farm_purchase_fee_lamports
             .saturating_mul(gs.referral_fee as u64)
             .saturating_div(100);
 
-        let fees_wallet_amount =
-            INITIAL_FARM_PURCHASE_FEE_LAMPORTS.saturating_sub(referral_fee_lamports);
+        let fees_wallet_amount = gs
+            .initial_farm_purchase_fee_lamports
+            .saturating_sub(referral_fee_lamports);
 
         // 1. Transfer the referral commission to the referrer's wallet.
         if referral_fee_lamports > 0 {
@@ -518,7 +531,7 @@ pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
                     to: ctx.accounts.fees_wallet.to_account_info(),
                 },
             ),
-            INITIAL_FARM_PURCHASE_FEE_LAMPORTS,
+            gs.initial_farm_purchase_fee_lamports,
         )?;
     }
 
@@ -537,11 +550,11 @@ pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
 
     // Give player 3 starter cards using the IDs from data.ts (not staked initially)
     for &card_id in STARTER_CARD_IDS.iter() {
-        if let Some((rarity, power, berry_consumption)) = get_card_by_id(card_id) {
+        if let Some((rarity, hashpower, berry_consumption)) = get_card_by_id(card_id) {
             let card = Card {
                 id: card_id,
                 rarity,
-                power,
+                hashpower,
                 berry_consumption,
             };
             player.add_card(card)?;
@@ -549,11 +562,12 @@ pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
     }
 
     player.berries = 0; // No cards staked initially
+    player.total_hashpower = 0; // No cards staked initially
     player.referrer = referrer;
     player.last_claim_slot = slot;
     player.last_upgrade_slot = slot;
     player.total_rewards = 0;
-    player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
     // Initialize gambling fields
     player.total_gambles = 0;
@@ -569,7 +583,7 @@ pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
     player.total_booster_packs_opened = 0;
     player.total_cards_recycled = 0;
     player.successful_card_recycling = 0;
-    player.total_sol_spent = INITIAL_FARM_PURCHASE_FEE_LAMPORTS;
+    player.total_sol_spent = gs.initial_farm_purchase_fee_lamports;
     player.total_tokens_spent = 0;
 
     // global stats (Effect) - no initial berry consumption since cards aren't staked
@@ -661,7 +675,7 @@ pub fn discard_card(ctx: Context<DiscardCard>, card_index: u8) -> Result<()> {
     // Remove the card using the helper function
     player.remove_card(card_index)?;
 
-    player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
     emit!(CardDiscarded {
         player: player.key(),
@@ -705,7 +719,7 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
 
     // Settle rewards before making changes
     update_pool(gs, slot);
-    player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
     // Security: Validate card index bounds
     validate_card_index(card_index, player.card_count as usize)?;
@@ -728,10 +742,13 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
 
     let card = &player.cards[card_index as usize];
     let card_berry_consumption = card.berry_consumption as u64;
+    let card_hashpower = card.hashpower as u64;
 
-    // Security: Use safe arithmetic for berry calculations
+    // Security: Use safe arithmetic for berry and power calculations
     let new_player_berries = safe_add_berries(player.berries, card_berry_consumption)?;
     let new_total_berries = safe_add_berries(gs.total_berries, card_berry_consumption)?;
+    let new_player_hashpower = safe_add_hashpower(player.total_hashpower, card_hashpower)?;
+    let new_total_hashpower = safe_add_hashpower(gs.total_hashpower, card_hashpower)?;
 
     require!(
         new_player_berries <= player.farm.berry_capacity,
@@ -741,7 +758,9 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
     // Effects
     player.stake_card(card_index)?;
     player.berries = new_player_berries;
+    player.total_hashpower = new_player_hashpower;
     gs.total_berries = new_total_berries;
+    gs.total_hashpower = new_total_hashpower;
 
     emit!(CardStaked {
         player: player.key(),
@@ -785,7 +804,7 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
 
     // Settle rewards before making changes
     update_pool(gs, slot);
-    player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
     // Security: Validate card index bounds
     validate_card_index(card_index, player.card_count as usize)?;
@@ -803,15 +822,20 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
 
     let card = &player.cards[card_index as usize];
     let card_berry_consumption = card.berry_consumption as u64;
+    let card_hashpower = card.hashpower as u64;
 
-    // Security: Use safe arithmetic for berry calculations
+    // Security: Use safe arithmetic for berry and power calculations
     let new_player_berries = safe_sub_berries(player.berries, card_berry_consumption)?;
     let new_total_berries = safe_sub_berries(gs.total_berries, card_berry_consumption)?;
+    let new_player_hashpower = safe_sub_hashpower(player.total_hashpower, card_hashpower)?;
+    let new_total_hashpower = safe_sub_hashpower(gs.total_hashpower, card_hashpower)?;
 
     // Effects
     player.unstake_card(card_index)?;
     player.berries = new_player_berries;
+    player.total_hashpower = new_player_hashpower;
     gs.total_berries = new_total_berries;
+    gs.total_hashpower = new_total_hashpower;
 
     emit!(CardUnstaked {
         player: player.key(),
@@ -907,7 +931,7 @@ pub fn upgrade_farm(ctx: Context<UpgradeFarm>, farm_type: u8) -> Result<()> {
     player.farm.total_cards = total_cards;
     player.farm.berry_capacity = berry_capacity;
     player.last_upgrade_slot = slot;
-    player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
     // Update global state for burned tokens
     gs.burned_tokens = gs.burned_tokens.saturating_add(burn_amount);
@@ -1061,7 +1085,7 @@ pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
     )?;
 
     // --- Token Fee, Burn, and Referral Logic ---
-    let booster_cost = BOOSTER_PACK_COST_MICROTOKENS;
+    let booster_cost = gs.booster_pack_cost_microtokens;
 
     // Validate Switchboard randomness account
     let randomness_data =
@@ -1215,7 +1239,7 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
 
     // Settle rewards before changing berry consumption
     update_pool(gs, clock.slot);
-    player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
     let mut card_ids = [0u16; 5];
     for i in 0..5 {
@@ -1245,7 +1269,7 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
 
         if !cards_of_rarity.is_empty() {
             let card_index = (random_u32 as usize) % cards_of_rarity.len();
-            let (card_id, _, power, berry_consumption) = cards_of_rarity[card_index];
+            let (card_id, _, hashpower, berry_consumption) = cards_of_rarity[card_index];
 
             require!(
                 (player.card_count as usize) < MAX_CARDS_PER_PLAYER as usize,
@@ -1255,7 +1279,7 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
             let new_card = Card {
                 id: *card_id,
                 rarity,
-                power: *power,
+                hashpower: *hashpower,
                 berry_consumption: *berry_consumption,
             };
             player.add_card(new_card)?;
@@ -1396,11 +1420,13 @@ pub fn reset_player(ctx: Context<ResetPlayer>) -> Result<()> {
     // Update pool to current slot
     update_pool(gs, slot);
 
-    // Store the old berry consumption to update global state
+    // Store the old berry consumption and power to update global state
     let old_berries = player.berries;
+    let old_power = player.total_hashpower;
 
-    // Reset player's berry consumption and farm
+    // Reset player's berry consumption, power, and farm
     player.berries = 0;
+    player.total_hashpower = 0;
     player.farm = Farm {
         farm_type: 1,
         total_cards: 2,
@@ -1410,12 +1436,13 @@ pub fn reset_player(ctx: Context<ResetPlayer>) -> Result<()> {
     player.card_count = 0;
     player.staked_cards_bitset = 0; // Clear all staked cards
 
-    // Update global berry consumption
+    // Update global berry consumption and power
     gs.total_berries = gs.total_berries.saturating_sub(old_berries);
+    gs.total_hashpower = gs.total_hashpower.saturating_sub(old_power);
 
     // Update player's last claim slot and accumulator
     player.last_claim_slot = slot;
-    player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
     // Reset any pending operations
     player.pending_action = PendingRandomAction::None;
@@ -1501,7 +1528,7 @@ pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
                 to: ctx.accounts.fees_wallet.to_account_info(),
             },
         ),
-        GAMBLE_FEE_LAMPORTS,
+        gs.gamble_fee_lamports,
     )?;
 
     // Burn the gambling tokens immediately
@@ -1523,7 +1550,9 @@ pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
     gs.total_global_gambles = gs.total_global_gambles.saturating_add(1);
 
     // Update player spending tracking
-    player.total_sol_spent = player.total_sol_spent.saturating_add(GAMBLE_FEE_LAMPORTS);
+    player.total_sol_spent = player
+        .total_sol_spent
+        .saturating_add(gs.gamble_fee_lamports);
     player.total_tokens_spent = player.total_tokens_spent.saturating_add(amount);
 
     msg!(
@@ -1760,7 +1789,7 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
 
     // Settle rewards before changing berry consumption
     update_pool(gs, clock.slot);
-    player.last_acc_tokens_per_berry = gs.acc_tokens_per_berry;
+    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
     // Store the card indices before removing them
     let recycled_indices = if let PendingRandomAction::Recycle { indices } = player.pending_action {
@@ -1821,7 +1850,7 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
 
         if !cards_of_rarity.is_empty() {
             let card_index = (random_u32 as usize) % cards_of_rarity.len();
-            let (card_id, _, power, berry_consumption) = cards_of_rarity[card_index];
+            let (card_id, _, hashpower, berry_consumption) = cards_of_rarity[card_index];
 
             require!(
                 (player.card_count as usize) < MAX_CARDS_PER_PLAYER as usize,
@@ -1831,7 +1860,7 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
             let new_card = Card {
                 id: *card_id,
                 rarity,
-                power: *power,
+                hashpower: *hashpower,
                 berry_consumption: *berry_consumption,
             };
             player.add_card(new_card)?;

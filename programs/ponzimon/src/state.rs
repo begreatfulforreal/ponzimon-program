@@ -15,10 +15,10 @@ pub struct GlobalState {
     pub start_slot: u64,         // Genesis slot
     pub halving_interval: u64,   // Slots between halvings
     pub last_processed_halvings: u64,
-    pub initial_reward_rate: u64,   // Reward per slot at genesis
-    pub current_reward_rate: u64,   // Cached reward per slot "now"
-    pub acc_tokens_per_berry: u128, // 1e12-scaled accumulator
-    pub last_reward_slot: u64,      // When `acc_tokens_per_berry` was last bumped
+    pub initial_reward_rate: u64,       // Reward per slot at genesis
+    pub current_reward_rate: u64,       // Cached reward per slot "now"
+    pub acc_tokens_per_hashpower: u128, // 1e12-scaled accumulator (renamed from acc_tokens_per_berry)
+    pub last_reward_slot: u64,          // When `acc_tokens_per_hashpower` was last bumped
 
     /* ── economic params ────────────────────────── */
     pub burn_rate: u8,               // % of token cost burned (default 75)
@@ -27,8 +27,14 @@ pub struct GlobalState {
     pub cooldown_slots: u64,         // Farm upgrade cooldown
     pub dust_threshold_divisor: u64, // Divisor for total_supply to get dust_threshold (default 1000 for 0.1%)
 
+    /* ── fee configuration ──────────────────────── */
+    pub initial_farm_purchase_fee_lamports: u64, // 0.3 SOL in lamports (was constant)
+    pub booster_pack_cost_microtokens: u64,      // 10 tokens in microtokens (was constant)
+    pub gamble_fee_lamports: u64,                // 0.1 SOL in lamports (was constant)
+
     /* ── gameplay stats ─────────────────────────── */
-    pub total_berries: u64, // Σ player berry consumption
+    pub total_berries: u64, // Σ player berry consumption (for capacity tracking)
+    pub total_hashpower: u64, // Σ player hashpower (for reward distribution)
 
     /* ── gambling stats ───────────────────────── */
     pub total_global_gambles: u64, // Total number of gambles across all players
@@ -61,9 +67,10 @@ pub struct Player {
     pub cards: [Card; MAX_CARDS_PER_PLAYER as usize], // Support up to 200 cards total
     pub card_count: u8,                               // Track actual number of cards
     pub staked_cards_bitset: u64, // Bitset tracking which cards are staked (supports up to 64 cards)
-    pub berries: u64,             // Total berry consumption by all cards
+    pub berries: u64,             // Total berry consumption by staked cards (for capacity limiting)
+    pub total_hashpower: u64,     // Total hashpower of staked cards (for reward calculation)
     pub referrer: Option<Pubkey>,
-    pub last_acc_tokens_per_berry: u128,
+    pub last_acc_tokens_per_hashpower: u128, // Renamed from last_acc_tokens_per_berry
     pub last_claim_slot: u64,
     pub last_upgrade_slot: u64,
     pub total_rewards: u64,
@@ -106,13 +113,13 @@ pub struct Farm {
 pub struct Card {
     pub id: u16,               // Card ID from the Pokemon card list
     pub rarity: u8, // Card rarity (0=Common, 1=Uncommon, 2=Rare, 3=VeryRare, 4=SuperRare, 5=MegaRare)
-    pub power: u16, // Power level of the card for rewards (max 65535 is enough)
+    pub hashpower: u16, // Hashpower level of the card for rewards (max 65535 is enough)
     pub berry_consumption: u8, // How many berries this card consumes per slot (max 255 is enough)
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
-pub struct CardPowerCheckpoint {
+pub struct CardHashpowerCheckpoint {
     pub slot: u64,
-    pub card_power: u64, // Total card power at this checkpoint
+    pub card_hashpower: u64, // Total card hashpower at this checkpoint
     pub accumulated_rewards: u64,
 }

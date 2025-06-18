@@ -26,6 +26,9 @@ pub mod ponzimon {
         total_supply: u64,
         initial_reward_rate: u64,
         cooldown_slots: Option<u64>,
+        initial_farm_purchase_fee_lamports: Option<u64>,
+        booster_pack_cost_microtokens: Option<u64>,
+        gamble_fee_lamports: Option<u64>,
     ) -> Result<()> {
         instructions::initialize_program(
             ctx,
@@ -34,6 +37,9 @@ pub mod ponzimon {
             total_supply,
             initial_reward_rate,
             cooldown_slots,
+            initial_farm_purchase_fee_lamports,
+            booster_pack_cost_microtokens,
+            gamble_fee_lamports,
         )
     }
     /// ────────────────────────────────────────────────────────────────────────────
