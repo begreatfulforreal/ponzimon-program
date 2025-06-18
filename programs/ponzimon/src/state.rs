@@ -64,8 +64,8 @@ pub enum PendingRandomAction {
     },
     Booster,
     Recycle {
-        card_count: u8,
-        total_hashpower: u64,
+        card_indices: [u8; 20], // Array of card indices to recycle
+        card_count: u8,         // Number of valid indices in the array
     },
 }
 

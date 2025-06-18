@@ -73,3 +73,17 @@ pub fn validate_randomness_delay(commit_slot: u64, current_slot: u64) -> Result<
     );
     Ok(())
 }
+
+/// Gets the next higher rarity for card recycling
+pub fn get_next_rarity(current_rarity: u8) -> Option<u8> {
+    match current_rarity {
+        COMMON => Some(UNCOMMON),
+        UNCOMMON => Some(RARE),
+        RARE => Some(DOUBLE_RARE),
+        DOUBLE_RARE => Some(VERY_RARE),
+        VERY_RARE => Some(SUPER_RARE),
+        SUPER_RARE => Some(MEGA_RARE),
+        MEGA_RARE => Some(MEGA_RARE), // Already at max rarity
+        _ => None,         // Invalid rarity
+    }
+}

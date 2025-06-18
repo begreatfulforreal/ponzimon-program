@@ -82,7 +82,7 @@ pub enum PonzimonError {
     RecycleAlreadyPending,
     #[msg("Player does not have a pending card recycle to settle.")]
     NoRecyclePending,
-    #[msg("Must provide exactly 10 cards for recycling.")]
+    #[msg("Must provide between 1 and 20 cards for recycling.")]
     InvalidRecycleCardCount,
     #[msg("Duplicate card indices not allowed in recycle.")]
     DuplicateRecycleCardIndices,

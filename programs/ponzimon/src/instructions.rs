@@ -42,9 +42,9 @@ pub struct BoosterOpened {
 #[event]
 pub struct CardsRecycled {
     pub player: Pubkey,
-    pub recycled_cards: [u8; 10], // Card indices that were recycled
-    pub success: bool,            // Whether recycling was successful (20% chance)
-    pub new_card_id: Option<u16>, // ID of new card if successful
+    pub recycled_cards: [u8; 20], // Card indices that were recycled
+    pub successful_upgrades: u8,  // Number of cards that were successfully upgraded
+    pub total_recycled: u8,       // Total number of cards that were recycled
 }
 
 /// Helper functions for working with fixed-size arrays
@@ -2137,7 +2137,7 @@ pub fn recycle_cards_commit(ctx: Context<RecycleCardsCommit>, card_indices: Vec<
     // Guards
     require!(gs.production_enabled, PonzimonError::ProductionDisabled);
     require!(
-        !card_indices.is_empty() && card_indices.len() <= 10,
+        !card_indices.is_empty() && card_indices.len() <= 20,
         PonzimonError::InvalidRecycleCardCount
     );
     require!(
@@ -2159,28 +2159,6 @@ pub fn recycle_cards_commit(ctx: Context<RecycleCardsCommit>, card_indices: Vec<
         require!(!player.is_card_staked(index), PonzimonError::CardIsStaked);
     }
 
-    // --- Effects (Immediate) ---
-    // Calculate total hashpower and berry consumption to be removed
-    let mut total_hashpower_reduction = 0u64;
-    let mut total_berry_reduction = 0u64; // Though only unstaked cards can be recycled, good practice.
-    for &index in &card_indices {
-        let card = &player.cards[index as usize];
-        total_hashpower_reduction = total_hashpower_reduction.saturating_add(card.hashpower as u64);
-        total_berry_reduction = total_berry_reduction.saturating_add(card.berry_consumption as u64);
-    }
-
-    // Remove the cards (must sort descending to not mess up indices)
-    let mut sorted_indices_desc = card_indices.clone();
-    sorted_indices_desc.sort_by(|a, b| b.cmp(a));
-    for &index in &sorted_indices_desc {
-        player.remove_card(index)?;
-    }
-
-    // Update player and global state. Since only unstaked cards can be recycled,
-    // player.berries and gs.total_berries are unaffected.
-    // player.total_hashpower and gs.total_hashpower are also unaffected.
-    // We only need to store the values for the settle logic.
-
     // Validate Switchboard randomness account
     let randomness_data =
         RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
@@ -2188,10 +2166,16 @@ pub fn recycle_cards_commit(ctx: Context<RecycleCardsCommit>, card_indices: Vec<
         return Err(PonzimonError::RandomnessAlreadyRevealed.into());
     }
 
-    // Set pending state with aggregate data
+    // Create array from vector (pad with 0s if needed)
+    let mut card_indices_array = [0u8; 20];
+    for (i, &index) in card_indices.iter().enumerate() {
+        card_indices_array[i] = index;
+    }
+
+    // Set pending state with card indices
     player.pending_action = PendingRandomAction::Recycle {
+        card_indices: card_indices_array,
         card_count: card_indices.len() as u8,
-        total_hashpower: total_hashpower_reduction,
     };
     player.commit_slot = randomness_data.seed_slot;
     player.randomness_account = ctx.accounts.randomness_account_data.key();
@@ -2251,63 +2235,88 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
     player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
     // Extract recycled card data from pending action
-    let (recycled_count, _recycled_hashpower) = if let PendingRandomAction::Recycle {
+    let (card_indices_array, card_count) = if let PendingRandomAction::Recycle {
+        card_indices,
         card_count,
-        total_hashpower,
     } = player.pending_action
     {
-        (card_count, total_hashpower)
+        (card_indices, card_count)
     } else {
         return Err(PonzimonError::NoRecyclePending.into());
     };
 
-    // Use random value to determine success (2% chance per card)
-    let random_percent = (random_value[0] as u32) % 100;
-    let success_threshold = (recycled_count as u32) * 2;
-    let success = random_percent < success_threshold;
+    let mut successful_upgrades = 0u8;
+    let mut new_cards: Vec<(u16, u8, u16, u8)> = Vec::new(); // Store new cards to add
 
-    let mut new_card_id = None;
+    // Process each card individually with 20% chance for upgrade
+    for i in 0..card_count {
+        let card_index = card_indices_array[i as usize];
 
-    if success {
-        // Generate a random new card
-        let mut random_bytes: [u8; 4] = [0; 4];
-        random_bytes.copy_from_slice(&random_value[4..8]);
-        let random_u32 = u32::from_le_bytes(random_bytes);
-
-        // Generate random rarity (same distribution as booster packs)
-        let random_percent = random_u32 % 100;
-        let rarity = match random_percent {
-            0..=49 => COMMON,       // 50%
-            50..=74 => UNCOMMON,    // 25%
-            75..=89 => RARE,        // 15%
-            90..=95 => DOUBLE_RARE, // 6%
-            96..=98 => VERY_RARE,   // 3%
-            _ => SUPER_RARE,        // 1%
-        };
-
-        let cards_of_rarity: Vec<&(u16, u8, u16, u8)> = CARD_DATA
-            .iter()
-            .filter(|(_, card_rarity, _, _)| *card_rarity == rarity)
-            .collect();
-
-        if !cards_of_rarity.is_empty() {
-            let card_index = (random_u32 as usize) % cards_of_rarity.len();
-            let (card_id, _, hashpower, berry_consumption) = cards_of_rarity[card_index];
-
-            require!(
-                (player.card_count as usize) < MAX_CARDS_PER_PLAYER as usize,
-                PonzimonError::MachineCapacityExceeded
-            );
-
-            let new_card = Card {
-                id: *card_id,
-                rarity,
-                hashpower: *hashpower,
-                berry_consumption: *berry_consumption,
-            };
-            player.add_card(new_card)?;
-            new_card_id = Some(*card_id);
+        // Validate card index is still valid
+        if (card_index as usize) >= (player.card_count as usize) {
+            continue; // Skip invalid indices
         }
+
+        let card = &player.cards[card_index as usize];
+        let current_rarity = card.rarity;
+
+        // Use different slice of random value for each card
+        let random_byte_index = (i as usize) % random_value.len();
+        let random_percent = (random_value[random_byte_index] as u32) % 100;
+
+        // 20% chance to upgrade to next rarity
+        if random_percent < 20 {
+            if let Some(next_rarity) = get_next_rarity(current_rarity) {
+                // Find a random card of the next rarity
+                let cards_of_next_rarity: Vec<&(u16, u8, u16, u8)> = CARD_DATA
+                    .iter()
+                    .filter(|(_, card_rarity, _, _)| *card_rarity == next_rarity)
+                    .collect();
+
+                if !cards_of_next_rarity.is_empty() {
+                    // Use additional randomness for card selection
+                    let mut random_bytes: [u8; 4] = [0; 4];
+                    let start_idx = (i as usize * 4) % (random_value.len() - 3);
+                    random_bytes.copy_from_slice(&random_value[start_idx..start_idx + 4]);
+                    let random_u32 = u32::from_le_bytes(random_bytes);
+
+                    let card_index_in_rarity = (random_u32 as usize) % cards_of_next_rarity.len();
+                    let (card_id, _, hashpower, berry_consumption) =
+                        cards_of_next_rarity[card_index_in_rarity];
+
+                    // Store the new card data to add after removing old cards
+                    new_cards.push((*card_id, next_rarity, *hashpower, *berry_consumption));
+                    successful_upgrades += 1;
+                }
+            }
+        }
+        // 80% chance: card is lost (no new card generated)
+    }
+
+    // Remove the recycled cards (must sort descending to not mess up indices)
+    let mut card_indices_vec: Vec<u8> = card_indices_array[0..card_count as usize].to_vec();
+    card_indices_vec.sort_by(|a, b| b.cmp(a));
+
+    for &index in &card_indices_vec {
+        if (index as usize) < (player.card_count as usize) {
+            player.remove_card(index)?;
+        }
+    }
+
+    // Add the new upgraded cards
+    for (card_id, rarity, hashpower, berry_consumption) in new_cards {
+        require!(
+            (player.card_count as usize) < MAX_CARDS_PER_PLAYER as usize,
+            PonzimonError::MachineCapacityExceeded
+        );
+
+        let new_card = Card {
+            id: card_id,
+            rarity,
+            hashpower,
+            berry_consumption,
+        };
+        player.add_card(new_card)?;
     }
 
     // Reset recycle state
@@ -2317,21 +2326,22 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
     // Update tracking statistics
     player.total_cards_recycled = player
         .total_cards_recycled
-        .saturating_add(recycled_count as u64);
-    if success {
-        player.successful_card_recycling = player.successful_card_recycling.saturating_add(1);
-        gs.total_successful_card_recycling = gs.total_successful_card_recycling.saturating_add(1);
+        .saturating_add(card_count as u64);
+
+    if successful_upgrades > 0 {
+        player.successful_card_recycling = player
+            .successful_card_recycling
+            .saturating_add(successful_upgrades as u64);
+        gs.total_successful_card_recycling = gs
+            .total_successful_card_recycling
+            .saturating_add(successful_upgrades as u64);
     }
 
-    // The event no longer needs to emit the recycled card indices,
-    // as they are removed from state immediately in the commit step.
-    // We can simplify the event or pass placeholder data.
-    // For now, let's pass a default array.
     emit!(CardsRecycled {
         player: player.key(),
-        recycled_cards: [0; 10], // Placeholder
-        success,
-        new_card_id,
+        recycled_cards: card_indices_array,
+        successful_upgrades,
+        total_recycled: card_count,
     });
 
     Ok(())
