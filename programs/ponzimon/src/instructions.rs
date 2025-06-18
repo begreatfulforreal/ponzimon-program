@@ -656,12 +656,6 @@ pub fn discard_card(ctx: Context<DiscardCard>, card_index: u8) -> Result<()> {
         PonzimonError::CardIsStaked
     );
 
-    // Ensure the card is not pending recycling
-    require!(
-        !player.is_card_pending_recycling(card_index),
-        PonzimonError::CardPendingRecycling
-    );
-
     settle_and_mint_rewards(
         player,
         gs,
@@ -727,12 +721,6 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
     require!(
         !player.is_card_staked(card_index),
         PonzimonError::CardIsStaked // Using for "already staked"
-    );
-
-    // Ensure the card is not pending recycling
-    require!(
-        !player.is_card_pending_recycling(card_index),
-        PonzimonError::CardPendingRecycling
     );
 
     require!(
@@ -812,12 +800,6 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
     require!(
         player.is_card_staked(card_index),
         PonzimonError::CardNotStaked
-    );
-
-    // Ensure the card is not pending recycling
-    require!(
-        !player.is_card_pending_recycling(card_index),
-        PonzimonError::CardPendingRecycling
     );
 
     let card = &player.cards[card_index as usize];
@@ -1690,10 +1672,7 @@ pub struct RecycleCardsCommit<'info> {
     pub randomness_account_data: AccountInfo<'info>,
 }
 
-pub fn recycle_cards_commit(
-    ctx: Context<RecycleCardsCommit>,
-    card_indices: [u8; 10],
-) -> Result<()> {
+pub fn recycle_cards_commit(ctx: Context<RecycleCardsCommit>, card_indices: Vec<u8>) -> Result<()> {
     let slot = Clock::get()?.slot;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
@@ -1701,27 +1680,49 @@ pub fn recycle_cards_commit(
     // Guards
     require!(gs.production_enabled, PonzimonError::ProductionDisabled);
     require!(
-        player.card_count >= 10,
+        !card_indices.is_empty() && card_indices.len() <= 10,
+        PonzimonError::InvalidRecycleCardCount
+    );
+    require!(
+        player.card_count as usize >= card_indices.len(),
         PonzimonError::InvalidRecycleCardCount
     );
 
     // Validate card indices: must be unique, valid, and not staked
     let mut sorted_indices = card_indices.clone();
     sorted_indices.sort();
-
-    // Check for duplicates
     for i in 1..sorted_indices.len() {
         require!(
             sorted_indices[i] != sorted_indices[i - 1],
             PonzimonError::DuplicateRecycleCardIndices
         );
     }
-
-    // Validate each card index
     for &index in &card_indices {
         validate_card_index(index, player.card_count as usize)?;
         require!(!player.is_card_staked(index), PonzimonError::CardIsStaked);
     }
+
+    // --- Effects (Immediate) ---
+    // Calculate total hashpower and berry consumption to be removed
+    let mut total_hashpower_reduction = 0u64;
+    let mut total_berry_reduction = 0u64; // Though only unstaked cards can be recycled, good practice.
+    for &index in &card_indices {
+        let card = &player.cards[index as usize];
+        total_hashpower_reduction = total_hashpower_reduction.saturating_add(card.hashpower as u64);
+        total_berry_reduction = total_berry_reduction.saturating_add(card.berry_consumption as u64);
+    }
+
+    // Remove the cards (must sort descending to not mess up indices)
+    let mut sorted_indices_desc = card_indices.clone();
+    sorted_indices_desc.sort_by(|a, b| b.cmp(a));
+    for &index in &sorted_indices_desc {
+        player.remove_card(index)?;
+    }
+
+    // Update player and global state. Since only unstaked cards can be recycled,
+    // player.berries and gs.total_berries are unaffected.
+    // player.total_hashpower and gs.total_hashpower are also unaffected.
+    // We only need to store the values for the settle logic.
 
     // Validate Switchboard randomness account
     let randomness_data =
@@ -1730,9 +1731,10 @@ pub fn recycle_cards_commit(
         return Err(PonzimonError::RandomnessAlreadyRevealed.into());
     }
 
-    // Store the card indices and set pending state
+    // Set pending state with aggregate data
     player.pending_action = PendingRandomAction::Recycle {
-        indices: card_indices,
+        card_count: card_indices.len() as u8,
+        total_hashpower: total_hashpower_reduction,
     };
     player.commit_slot = randomness_data.seed_slot;
     player.randomness_account = ctx.accounts.randomness_account_data.key();
@@ -1787,41 +1789,25 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
         .get_value(&clock)
         .map_err(|_| PonzimonError::RandomnessNotResolved)?;
 
-    // Settle rewards before changing berry consumption
+    // Settle rewards before changing player state
     update_pool(gs, clock.slot);
     player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
 
-    // Store the card indices before removing them
-    let recycled_indices = if let PendingRandomAction::Recycle { indices } = player.pending_action {
-        indices
+    // Extract recycled card data from pending action
+    let (recycled_count, _recycled_hashpower) = if let PendingRandomAction::Recycle {
+        card_count,
+        total_hashpower,
+    } = player.pending_action
+    {
+        (card_count, total_hashpower)
     } else {
         return Err(PonzimonError::NoRecyclePending.into());
     };
 
-    // Calculate total berry consumption of cards to be removed
-    let mut total_berry_reduction = 0u64;
-    for &index in &recycled_indices {
-        let card = &player.cards[index as usize];
-        if player.is_card_staked(index) {
-            total_berry_reduction += card.berry_consumption as u64;
-        }
-    }
-
-    // Remove the 10 cards (sorted in descending order to avoid index shifting issues)
-    let mut sorted_indices = recycled_indices.clone();
-    sorted_indices.sort_by(|a, b| b.cmp(a)); // Sort in descending order
-
-    for &index in &sorted_indices {
-        player.remove_card(index)?;
-    }
-
-    // Update berry consumption
-    player.berries = player.berries.saturating_sub(total_berry_reduction);
-    gs.total_berries = gs.total_berries.saturating_sub(total_berry_reduction);
-
-    // Use random value to determine success (20% chance)
+    // Use random value to determine success (2% chance per card)
     let random_percent = (random_value[0] as u32) % 100;
-    let success = random_percent < 20; // 20% chance
+    let success_threshold = (recycled_count as u32) * 2;
+    let success = random_percent < success_threshold;
 
     let mut new_card_id = None;
 
@@ -1842,7 +1828,6 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
             _ => SUPER_RARE,        // 1%
         };
 
-        // Find a random card of the determined rarity
         let cards_of_rarity: Vec<&(u16, u8, u16, u8)> = CARD_DATA
             .iter()
             .filter(|(_, card_rarity, _, _)| *card_rarity == rarity)
@@ -1873,15 +1858,21 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
     player.commit_slot = 0;
 
     // Update tracking statistics
-    player.total_cards_recycled = player.total_cards_recycled.saturating_add(10);
+    player.total_cards_recycled = player
+        .total_cards_recycled
+        .saturating_add(recycled_count as u64);
     if success {
         player.successful_card_recycling = player.successful_card_recycling.saturating_add(1);
         gs.total_successful_card_recycling = gs.total_successful_card_recycling.saturating_add(1);
     }
 
+    // The event no longer needs to emit the recycled card indices,
+    // as they are removed from state immediately in the commit step.
+    // We can simplify the event or pass placeholder data.
+    // For now, let's pass a default array.
     emit!(CardsRecycled {
         player: player.key(),
-        recycled_cards: recycled_indices,
+        recycled_cards: [0; 10], // Placeholder
         success,
         new_card_id,
     });

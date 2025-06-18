@@ -116,7 +116,7 @@ pub mod ponzimon {
 
     pub fn recycle_cards_commit(
         ctx: Context<RecycleCardsCommit>,
-        card_indices: [u8; 10],
+        card_indices: Vec<u8>,
     ) -> Result<()> {
         instructions::recycle_cards_commit(ctx, card_indices)
     }

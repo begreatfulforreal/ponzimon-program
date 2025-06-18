@@ -49,9 +49,14 @@ pub struct GlobalState {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
 pub enum PendingRandomAction {
     None,
-    Gamble { amount: u64 },
+    Gamble {
+        amount: u64,
+    },
     Booster,
-    Recycle { indices: [u8; 10] },
+    Recycle {
+        card_count: u8,
+        total_hashpower: u64,
+    },
 }
 
 impl Default for PendingRandomAction {
@@ -92,14 +97,8 @@ pub struct Player {
 }
 
 impl Player {
-    /// Check if a card index is pending recycling
-    pub fn is_card_pending_recycling(&self, index: u8) -> bool {
-        if let PendingRandomAction::Recycle { indices } = &self.pending_action {
-            indices.contains(&index)
-        } else {
-            false
-        }
-    }
+    // The is_card_pending_recycling function is removed as cards are now removed immediately
+    // in the commit step, making this check obsolete.
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
