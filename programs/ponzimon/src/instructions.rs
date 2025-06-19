@@ -2525,9 +2525,7 @@ pub fn cancel_pending_action(ctx: Context<CancelPendingAction>) -> Result<()> {
     let player = &mut ctx.accounts.player;
     let clock = Clock::get()?;
 
-    // To prevent users from canceling just because they might have seen the randomness result,
-    // we enforce a waiting period. This function is an escape hatch for stuck transactions.
-    const CANCEL_TIMEOUT_SLOTS: u64 = 200; // Approx. 80 seconds
+    const CANCEL_TIMEOUT_SLOTS: u64 = 100; // Approx. 80 seconds
 
     require!(
         clock.slot > player.commit_slot + CANCEL_TIMEOUT_SLOTS,
@@ -2537,11 +2535,24 @@ pub fn cancel_pending_action(ctx: Context<CancelPendingAction>) -> Result<()> {
     // If the action was a gamble or booster pack, the tokens/SOL have already been spent
     // and are not refunded. This is the cost of canceling to prevent abuse.
 
-    // If the action being cancelled was recycling, we should decrement the attempt counter
-    // as it's a non-financial action that didn't complete.
-    if let PendingRandomAction::Recycle { .. } = player.pending_action {
-        let gs = &mut ctx.accounts.global_state;
-        gs.total_card_recycling_attempts = gs.total_card_recycling_attempts.saturating_sub(1);
+    // If the action being cancelled was recycling, the submitted cards are forfeited
+    // to prevent abuse. The recycling attempt is still counted as a failed one.
+    if let PendingRandomAction::Recycle {
+        card_indices,
+        card_count,
+    } = player.pending_action.clone()
+    {
+        // Must remove cards from highest index to lowest to avoid shifting issues.
+        let mut indices_to_remove: Vec<u8> = card_indices[0..card_count as usize].to_vec();
+        indices_to_remove.sort_by(|a, b| b.cmp(a)); // Sort descending
+
+        for &index in &indices_to_remove {
+            // The card is not staked, so we can just remove it.
+            // The remove_card function handles shifting indices correctly.
+            if (index as usize) < (player.card_count as usize) {
+                player.remove_card(index)?;
+            }
+        }
     }
 
     // Reset the player's pending action state, allowing them to try another action.
