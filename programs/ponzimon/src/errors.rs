@@ -112,4 +112,8 @@ pub enum PonzimonError {
     // New error variant for invalid parameter index
     #[msg("Invalid Parameter Index")]
     InvalidParameterIndex,
+    #[msg("No pending action to cancel.")]
+    NoPendingAction,
+    #[msg("Cannot cancel yet. A timeout period is required.")]
+    CancelTimeoutNotExpired,
 }

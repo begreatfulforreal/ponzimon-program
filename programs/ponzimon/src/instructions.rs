@@ -2496,3 +2496,57 @@ pub fn update_sol_rewards(ctx: Context<UpdateSolRewards>) -> Result<()> {
 
     Ok(())
 }
+
+/// ────────────────────────────────────────────────────────────────────────────
+///  CANCEL PENDING ACTION
+/// ────────────────────────────────────────────────────────────────────────────
+#[derive(Accounts)]
+pub struct CancelPendingAction<'info> {
+    #[account(mut)]
+    pub player_wallet: Signer<'info>,
+    #[account(
+        mut,
+        constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
+        constraint = player.pending_action != PendingRandomAction::None @ PonzimonError::NoPendingAction,
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
+        bump
+    )]
+    pub player: Box<Account<'info, Player>>,
+    #[account(
+        mut,
+        seeds = [GLOBAL_STATE_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub global_state: Account<'info, GlobalState>,
+    pub token_mint: Account<'info, Mint>,
+}
+
+pub fn cancel_pending_action(ctx: Context<CancelPendingAction>) -> Result<()> {
+    let player = &mut ctx.accounts.player;
+    let clock = Clock::get()?;
+
+    // To prevent users from canceling just because they might have seen the randomness result,
+    // we enforce a waiting period. This function is an escape hatch for stuck transactions.
+    const CANCEL_TIMEOUT_SLOTS: u64 = 200; // Approx. 80 seconds
+
+    require!(
+        clock.slot > player.commit_slot + CANCEL_TIMEOUT_SLOTS,
+        PonzimonError::CancelTimeoutNotExpired
+    );
+
+    // If the action was a gamble or booster pack, the tokens/SOL have already been spent
+    // and are not refunded. This is the cost of canceling to prevent abuse.
+
+    // If the action being cancelled was recycling, we should decrement the attempt counter
+    // as it's a non-financial action that didn't complete.
+    if let PendingRandomAction::Recycle { .. } = player.pending_action {
+        let gs = &mut ctx.accounts.global_state;
+        gs.total_card_recycling_attempts = gs.total_card_recycling_attempts.saturating_sub(1);
+    }
+
+    // Reset the player's pending action state, allowing them to try another action.
+    player.pending_action = PendingRandomAction::None;
+    player.commit_slot = 0;
+
+    Ok(())
+}
