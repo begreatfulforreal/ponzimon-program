@@ -473,17 +473,18 @@ pub struct PurchaseInitialFarm<'info> {
             + 8        // total_gambles: u64
             + 8        // total_gamble_wins: u64
             // --- Consolidated randomness fields ---
-            + 11       // pending_action: PendingRandomAction enum (1 byte disc + 10 for largest variant)
+            + 22       // pending_action: PendingRandomAction enum (1 byte disc + 21 for largest Recycle variant)
             + 32       // randomness_account: Pubkey
             + 8        // commit_slot: u64
             // --- Additional player stats ---
-            + 8        // total_referral_earnings: u64
+            + 8        // total_earnings_for_referrer: u64
             + 8        // total_booster_packs_opened: u64
             + 8        // total_cards_recycled: u64
             + 8        // successful_card_recycling: u64
             + 8        // total_sol_spent: u64
             + 8        // total_tokens_spent: u64
-            + 8 + 8 + 16 + 16 + 8, // Staking stats: staked_tokens + last_stake_slot + last_acc_sol_rewards_per_token + last_acc_token_rewards_per_token + claimed_token_rewards
+            + 8 + 8 + 16 + 16 + 8  // Staking stats: staked_tokens + last_stake_slot + last_acc_sol_rewards_per_token + last_acc_token_rewards_per_token + claimed_token_rewards
+            + 64,      // padding: [u8; 64] for future expansion
         seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
         bump
     )]
@@ -672,6 +673,9 @@ pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
     player.last_acc_sol_rewards_per_token = 0;
     player.last_acc_token_rewards_per_token = 0;
     player.claimed_token_rewards = 0;
+
+    // Initialize padding field
+    player.padding = [0u8; 64];
 
     // global stats (Effect) - no initial berry consumption since cards aren't staked
     // gs.total_berries += 0; // No change needed

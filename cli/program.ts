@@ -651,7 +651,7 @@ program
     "-i, --initial-reward-rate <number>",
     "Initial reward rate (integer, e.g. 50000000)"
   )
-  .requiredOption("-c, --cooldown-slots <number>", "Cooldown slots")
+  .requiredOption("-c, --cooldown-slots <number>", "Cooldown slots", "0")
   .option(
     "-n, --network <url>",
     "Solana network URL",
