@@ -133,6 +133,10 @@ pub mod ponzimon {
     pub fn claim_staking_rewards(ctx: Context<ClaimStakingRewards>) -> Result<()> {
         instructions::claim_staking_rewards(ctx)
     }
+
+    pub fn cancel_pending_action(ctx: Context<CancelPendingAction>) -> Result<()> {
+        instructions::cancel_pending_action(ctx)
+    }
 }
 
 fn enforce_admin(key: &Pubkey) -> Result<()> {
