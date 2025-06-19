@@ -1809,39 +1809,85 @@ pub struct UpdateParameters<'info> {
     pub global_state: Account<'info, GlobalState>,
 }
 
-pub fn update_parameters(
+/// Updates a single parameter in the global state.
+///
+/// # Arguments
+///
+/// * `ctx` - The context for the instruction.
+/// * `parameter_index` - The index of the parameter to update:
+///     - 0: ReferralFee (u8)
+///     - 1: BurnRate (u8)
+///     - 2: CooldownSlots (u64)
+///     - 3: HalvingInterval (u64)
+///     - 4: DustThresholdDivisor (u64)
+///     - 5: InitialFarmPurchaseFeeLamports (u64)
+///     - 6: BoosterPackCostMicrotokens (u64)
+///     - 7: GambleFeeLamports (u64)
+///     - 8: StakingLockupSlots (u64)
+///     - 9: TokenRewardRate (u64)
+///     - 10: InitialRewardRate (u64)
+/// * `parameter_value` - The new value for the parameter.
+pub fn update_parameter(
     ctx: Context<UpdateParameters>,
-    referral_fee: Option<u8>,
-    burn_rate: Option<u8>,
-    cooldown_slots: Option<u64>,
-    halving_interval: Option<u64>,
-    dust_threshold_divisor: Option<u64>,
+    parameter_index: u8,
+    parameter_value: u64,
 ) -> Result<()> {
     let global_state = &mut ctx.accounts.global_state;
 
-    if let Some(fee) = referral_fee {
-        require!(fee <= 50, PonzimonError::InvalidReferralFee); // Max 5.0%
-        global_state.referral_fee = fee;
-    }
-
-    if let Some(rate) = burn_rate {
-        require!(rate <= 100, PonzimonError::InvalidBurnRate); // Max 100%
-        global_state.burn_rate = rate;
-    }
-
-    if let Some(slots) = cooldown_slots {
-        require!(slots > 0, PonzimonError::InvalidCooldownSlots);
-        global_state.cooldown_slots = slots;
-    }
-
-    if let Some(halving) = halving_interval {
-        require!(halving > 0, PonzimonError::InvalidHalvingInterval);
-        global_state.halving_interval = halving;
-    }
-
-    if let Some(divisor) = dust_threshold_divisor {
-        require!(divisor > 0, PonzimonError::InvalidDustThresholdDivisor);
-        global_state.dust_threshold_divisor = divisor;
+    match parameter_index {
+        0 => {
+            // ReferralFee
+            require!(parameter_value <= 50, PonzimonError::InvalidReferralFee);
+            global_state.referral_fee = parameter_value as u8;
+        }
+        1 => {
+            // BurnRate
+            require!(parameter_value <= 100, PonzimonError::InvalidBurnRate);
+            global_state.burn_rate = parameter_value as u8;
+        }
+        2 => {
+            // CooldownSlots
+            require!(parameter_value > 0, PonzimonError::InvalidCooldownSlots);
+            global_state.cooldown_slots = parameter_value;
+        }
+        3 => {
+            // HalvingInterval
+            require!(parameter_value > 0, PonzimonError::InvalidHalvingInterval);
+            global_state.halving_interval = parameter_value;
+        }
+        4 => {
+            // DustThresholdDivisor
+            require!(
+                parameter_value > 0,
+                PonzimonError::InvalidDustThresholdDivisor
+            );
+            global_state.dust_threshold_divisor = parameter_value;
+        }
+        5 => {
+            // InitialFarmPurchaseFeeLamports
+            global_state.initial_farm_purchase_fee_lamports = parameter_value;
+        }
+        6 => {
+            // BoosterPackCostMicrotokens
+            global_state.booster_pack_cost_microtokens = parameter_value;
+        }
+        7 => {
+            // GambleFeeLamports
+            global_state.gamble_fee_lamports = parameter_value;
+        }
+        8 => {
+            // StakingLockupSlots
+            global_state.staking_lockup_slots = parameter_value;
+        }
+        9 => {
+            // TokenRewardRate
+            global_state.token_reward_rate = parameter_value;
+        }
+        10 => {
+            // InitialRewardRate
+            global_state.initial_reward_rate = parameter_value;
+        }
+        _ => return err!(PonzimonError::InvalidParameterIndex),
     }
 
     Ok(())

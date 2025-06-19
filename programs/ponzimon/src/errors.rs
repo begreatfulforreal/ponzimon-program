@@ -108,4 +108,8 @@ pub enum PonzimonError {
     InsufficientStake,
     #[msg("Staked tokens are locked.")]
     StakeLocked,
+
+    // New error variant for invalid parameter index
+    #[msg("Invalid Parameter Index")]
+    InvalidParameterIndex,
 }

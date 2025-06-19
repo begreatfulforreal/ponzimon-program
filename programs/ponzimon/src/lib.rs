@@ -61,22 +61,12 @@ pub mod ponzimon {
     pub fn update_sol_rewards(ctx: Context<UpdateSolRewards>) -> Result<()> {
         instructions::update_sol_rewards(ctx)
     }
-    pub fn update_parameters(
+    pub fn update_parameter(
         ctx: Context<UpdateParameters>,
-        referral_fee: Option<u8>,
-        burn_rate: Option<u8>,
-        cooldown_slots: Option<u64>,
-        halving_interval: Option<u64>,
-        dust_threshold_divisor: Option<u64>,
+        parameter_index: u8,
+        parameter_value: u64,
     ) -> Result<()> {
-        instructions::update_parameters(
-            ctx,
-            referral_fee,
-            burn_rate,
-            cooldown_slots,
-            halving_interval,
-            dust_threshold_divisor,
-        )
+        instructions::update_parameter(ctx, parameter_index, parameter_value)
     }
 
     // ────────────────────────────────────────────────────────────────────────────

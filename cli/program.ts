@@ -7,7 +7,7 @@ import {
   SYSVAR_CLOCK_PUBKEY,
   Transaction,
 } from "@solana/web3.js";
-import { Program, BN } from "@coral-xyz/anchor";
+import { Program, BN, IdlTypes } from "@coral-xyz/anchor";
 import {
   AuthorityType,
   createSetAuthorityInstruction,
@@ -285,11 +285,8 @@ async function updateParameters(
   network: string,
   keypairPath: string,
   tokenMintAddress: string,
-  referralFee: number | null,
-  burnRate: number | null,
-  cooldownSlots: number | null,
-  halvingInterval: number | null,
-  dustThresholdDivisor: number | null
+  parameterIndex: number,
+  parameterValue: string
 ) {
   if (!keypairPath) {
     console.error("Please provide path to keypair file as argument");
@@ -320,15 +317,11 @@ async function updateParameters(
       program.programId
     );
 
-    console.log("Updating parameters... cooldownSlots", cooldownSlots);
+    console.log(
+      `Updating parameter index ${parameterIndex} to ${parameterValue}...`
+    );
     const tx = await program.methods
-      .updateParameters(
-        referralFee,
-        burnRate,
-        cooldownSlots ? new BN(cooldownSlots) : null,
-        halvingInterval ? new BN(halvingInterval) : null,
-        dustThresholdDivisor ? new BN(dustThresholdDivisor) : null
-      )
+      .updateParameter(parameterIndex, new BN(parameterValue))
       .accountsStrict({
         authority: wallet.publicKey,
         globalState: globalStateKey,
@@ -338,10 +331,8 @@ async function updateParameters(
     console.log("Transaction signature:", tx);
     console.log("Parameters updated successfully!");
     console.log({
-      referralFee: referralFee !== null ? referralFee : "unchanged",
-      burnRate: burnRate !== null ? burnRate : "unchanged",
-      cooldownSlots: cooldownSlots !== null ? cooldownSlots : "unchanged",
-      halvingInterval: halvingInterval !== null ? halvingInterval : "unchanged",
+      parameterIndex,
+      parameterValue,
     });
   } catch (error) {
     console.error("Error:", error);
@@ -671,15 +662,14 @@ program
   });
 
 program
-  .command("update-params")
-  .description("Update program parameters")
+  .command("update-parameter")
+  .description(
+    "Update a single program parameter by index. Indices: 0: ReferralFee, 1: BurnRate, 2: CooldownSlots, etc."
+  )
   .requiredOption("-k, --keypair <path>", "Path to keypair file")
   .requiredOption("-m, --mint <address>", "Token mint address")
-  .option("--referral-fee <number>", "Referral fee", null)
-  .option("--burn-rate <number>", "Burn rate", null)
-  .option("--cooldown-slots <number>", "Cooldown slots", null)
-  .option("--halving-interval <number>", "Halving interval", null)
-  .option("--dust-threshold-divisor <number>", "Dust threshold divisor", null)
+  .requiredOption("--index <number>", "The index of the parameter to update.")
+  .requiredOption("--value <string>", "The new value for the parameter.")
   .option(
     "-n, --network <url>",
     "Solana network URL",
@@ -690,13 +680,8 @@ program
       opts.network,
       opts.keypair,
       opts.mint,
-      opts.referralFee !== null ? parseInt(opts.referralFee) : null,
-      opts.burnRate !== null ? parseInt(opts.burnRate) : null,
-      opts.cooldownSlots !== null ? parseInt(opts.cooldownSlots) : null,
-      opts.halvingInterval !== null ? parseInt(opts.halvingInterval) : null,
-      opts.dustThresholdDivisor !== null
-        ? parseInt(opts.dustThresholdDivisor)
-        : null
+      parseInt(opts.index),
+      opts.value
     );
   });
 
