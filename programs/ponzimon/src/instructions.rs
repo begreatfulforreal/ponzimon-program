@@ -1564,6 +1564,10 @@ pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
     // --- Token Fee, Burn, and Referral Logic ---
     let booster_cost = gs.booster_pack_cost_microtokens;
 
+    // Verify the randomness account
+    if ctx.accounts.randomness_account_data.key() != player.randomness_account {
+        return Err(PonzimonError::InvalidRandomnessAccount.into());
+    }
     // Validate Switchboard randomness account
     let randomness_data =
         RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
@@ -1661,7 +1665,6 @@ pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
     // Set player state for settlement
     player.pending_action = PendingRandomAction::Booster;
     player.commit_slot = randomness_data.seed_slot;
-    player.randomness_account = ctx.accounts.randomness_account_data.key();
 
     // Update player spending tracking
     player.total_tokens_spent = player.total_tokens_spent.saturating_add(booster_cost);
@@ -2028,6 +2031,10 @@ pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
         PonzimonError::InsufficientTokens
     );
 
+    // Verify the randomness account
+    if ctx.accounts.randomness_account_data.key() != player.randomness_account {
+        return Err(PonzimonError::InvalidRandomnessAccount.into());
+    }
     // Parse randomness data
     let randomness_data =
         RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
@@ -2040,7 +2047,6 @@ pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
 
     // Track the player's committed values
     player.commit_slot = randomness_data.seed_slot;
-    player.randomness_account = ctx.accounts.randomness_account_data.key();
     player.pending_action = PendingRandomAction::Gamble { amount };
 
     // Gamble SOL fee
@@ -2244,6 +2250,10 @@ pub fn recycle_cards_commit(ctx: Context<RecycleCardsCommit>, card_indices: Vec<
         require!(!player.is_card_staked(index), PonzimonError::CardIsStaked);
     }
 
+    // Verify the randomness account
+    if ctx.accounts.randomness_account_data.key() != player.randomness_account {
+        return Err(PonzimonError::InvalidRandomnessAccount.into());
+    }
     // Validate Switchboard randomness account
     let randomness_data =
         RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
@@ -2263,7 +2273,6 @@ pub fn recycle_cards_commit(ctx: Context<RecycleCardsCommit>, card_indices: Vec<
         card_count: card_indices.len() as u8,
     };
     player.commit_slot = randomness_data.seed_slot;
-    player.randomness_account = ctx.accounts.randomness_account_data.key();
 
     // Update recycling attempt tracking
     gs.total_card_recycling_attempts = gs.total_card_recycling_attempts.saturating_add(1);
