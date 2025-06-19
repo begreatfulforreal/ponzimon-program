@@ -629,7 +629,7 @@ program
   )
   .action(async (opts) => {
     // Parse amount as a number and convert to smallest units (assuming 6 decimals)
-    const amount = BigInt(Math.floor(Number(opts.amount) * 1_000_000));
+    const amount = BigInt(Math.floor(Number(opts.amount) * 1e6));
     await mintToken(opts.keypair, opts.network, opts.mintKeypair, amount);
   });
 

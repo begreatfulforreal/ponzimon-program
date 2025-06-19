@@ -485,7 +485,7 @@ pub struct PurchaseInitialFarm<'info> {
             + 8        // total_tokens_spent: u64
             + 8 + 8 + 16 + 16 + 8  // Staking stats: staked_tokens + last_stake_slot + last_acc_sol_rewards_per_token + last_acc_token_rewards_per_token + claimed_token_rewards
             + 64,      // padding: [u8; 64] for future expansion
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -704,7 +704,7 @@ pub struct DiscardCard<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -787,7 +787,7 @@ pub struct StakeCard<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -872,7 +872,7 @@ pub struct UnstakeCard<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -949,7 +949,7 @@ pub struct UpgradeFarm<'info> {
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         constraint = farm_type > player.farm.farm_type @ PonzimonError::InvalidFarmType,
         constraint = farm_type <= MAX_FARM_TYPE @ PonzimonError::InvalidFarmType,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -1073,7 +1073,7 @@ pub struct ClaimRewards<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -1120,7 +1120,7 @@ pub struct StakeTokens<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -1242,7 +1242,7 @@ pub struct UnstakeTokens<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -1379,7 +1379,7 @@ pub struct ClaimStakingRewards<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -1506,7 +1506,7 @@ pub struct RequestOpenBooster<'info> {
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         constraint = player.pending_action == PendingRandomAction::None @ PonzimonError::BoosterAlreadyPending,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -1677,7 +1677,7 @@ pub struct SettleOpenBooster<'info> {
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         constraint = player.pending_action == PendingRandomAction::Booster @ PonzimonError::NoBoosterPending,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -1727,15 +1727,16 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
         random_bytes.copy_from_slice(&random_value[slice_start..slice_end]);
         let random_u32 = u32::from_le_bytes(random_bytes);
 
-        let random_percent = random_u32 % 100;
+        let random_percent = random_u32 % 1000;
 
         let rarity = match random_percent {
-            0..=49 => COMMON,       // 50%
-            50..=74 => UNCOMMON,    // 25%
-            75..=89 => RARE,        // 15%
-            90..=95 => DOUBLE_RARE, // 6%
-            96..=98 => VERY_RARE,   // 3%
-            _ => SUPER_RARE,        // 1%
+            0..=499 => COMMON,        // 50.0%
+            500..=749 => UNCOMMON,    // 25.0%
+            750..=899 => RARE,        // 15.0%
+            900..=959 => DOUBLE_RARE, // 6.0%
+            960..=989 => VERY_RARE,   // 3.0%
+            990..=998 => SUPER_RARE,  // 0.9%
+            _ => MEGA_RARE,           // 0.1%
         };
 
         // Find a random card of the determined rarity
@@ -1880,7 +1881,7 @@ pub struct ResetPlayer<'info> {
     pub global_state: Account<'info, GlobalState>,
     #[account(
         mut,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -1937,7 +1938,7 @@ pub struct GambleCommit<'info> {
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         constraint = player.pending_action == PendingRandomAction::None @ PonzimonError::AlreadyHasPendingGamble,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -2047,7 +2048,7 @@ pub struct GambleSettle<'info> {
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         constraint = matches!(player.pending_action, PendingRandomAction::Gamble { .. }) @ PonzimonError::NoPendingGamble,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -2152,7 +2153,7 @@ pub struct RecycleCardsCommit<'info> {
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         constraint = player.pending_action == PendingRandomAction::None @ PonzimonError::RecycleAlreadyPending,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
@@ -2232,7 +2233,7 @@ pub struct RecycleCardsSettle<'info> {
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
         constraint = matches!(player.pending_action, PendingRandomAction::Recycle { .. }) @ PonzimonError::NoRecyclePending,
-        seeds = [PLAYER_SEED, player_wallet.key().as_ref()],
+        seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
     pub player: Box<Account<'info, Player>>,
