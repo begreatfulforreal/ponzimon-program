@@ -101,7 +101,28 @@ export async function setupTestProgram() {
     connection: provider.connection,
     mint,
     authority,
+    globalState: globalStatePda,
+    feesWallet: authority.publicKey,
+    solRewardsWallet: solRewardsWalletPda,
+    stakingVault: stakingVaultPda,
   };
+}
+
+export async function airdrop(
+  provider: anchor.AnchorProvider,
+  address: anchor.web3.PublicKey,
+  amount: number
+) {
+  const airdropSig = await provider.connection.requestAirdrop(
+    address,
+    amount * anchor.web3.LAMPORTS_PER_SOL
+  );
+  const latestBlockhash = await provider.connection.getLatestBlockhash();
+  await provider.connection.confirmTransaction({
+    blockhash: latestBlockhash.blockhash,
+    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    signature: airdropSig,
+  });
 }
 
 export async function setupTestPlayer(
@@ -170,13 +191,21 @@ export async function createTestMint(
   );
 }
 
-export async function createTestAccount(
-  connection: Connection,
-  payer: Keypair,
+export async function createTestTokenAccount(
+  provider: anchor.AnchorProvider,
   mint: anchor.web3.PublicKey,
-  owner: anchor.web3.PublicKey
+  owner: anchor.web3.PublicKey,
+  isAssociated = false
 ) {
-  return await createAccount(connection as any, payer, mint, owner);
+  if (isAssociated) {
+    const address = await getAssociatedTokenAddress(mint, owner, false);
+    return { address };
+  }
+  const account = Keypair.generate();
+  return {
+    address: account.publicKey,
+    keypair: account,
+  };
 }
 
 // You may need to add more helper functions here as needed for your tests

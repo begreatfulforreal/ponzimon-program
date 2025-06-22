@@ -103,14 +103,6 @@ pub mod ponzimon {
         instructions::claim_rewards(ctx)
     }
 
-    // pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
-    //     instructions::gamble_commit(ctx, amount)
-    // }
-
-    // pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
-    //     instructions::gamble_settle(ctx)
-    // }
-
     pub fn recycle_cards_commit(
         ctx: Context<RecycleCardsCommit>,
         card_indices: Vec<u8>,
@@ -122,17 +114,25 @@ pub mod ponzimon {
         instructions::recycle_cards_settle(ctx)
     }
 
-    pub fn stake_tokens(ctx: Context<StakeTokens>, amount: u64) -> Result<()> {
-        instructions::stake_tokens(ctx, amount)
-    }
+    // pub fn stake_tokens(ctx: Context<StakeTokens>, amount: u64) -> Result<()> {
+    //     instructions::stake_tokens(ctx, amount)
+    // }
 
-    pub fn unstake_tokens(ctx: Context<UnstakeTokens>, amount: u64) -> Result<()> {
-        instructions::unstake_tokens(ctx, amount)
-    }
+    // pub fn unstake_tokens(ctx: Context<UnstakeTokens>, amount: u64) -> Result<()> {
+    //     instructions::unstake_tokens(ctx, amount)
+    // }
 
-    pub fn claim_staking_rewards(ctx: Context<ClaimStakingRewards>) -> Result<()> {
-        instructions::claim_staking_rewards(ctx)
-    }
+    // pub fn claim_staking_rewards(ctx: Context<ClaimStakingRewards>) -> Result<()> {
+    //     instructions::claim_staking_rewards(ctx)
+    // }
+
+    // pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
+    //     instructions::gamble_commit(ctx, amount)
+    // }
+
+    // pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
+    //     instructions::gamble_settle(ctx)
+    // }
 
     pub fn cancel_pending_action(ctx: Context<CancelPendingAction>) -> Result<()> {
         instructions::cancel_pending_action(ctx)
