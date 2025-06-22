@@ -103,13 +103,13 @@ pub mod ponzimon {
         instructions::claim_rewards(ctx)
     }
 
-    pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
-        instructions::gamble_commit(ctx, amount)
-    }
+    // pub fn gamble_commit(ctx: Context<GambleCommit>, amount: u64) -> Result<()> {
+    //     instructions::gamble_commit(ctx, amount)
+    // }
 
-    pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
-        instructions::gamble_settle(ctx)
-    }
+    // pub fn gamble_settle(ctx: Context<GambleSettle>) -> Result<()> {
+    //     instructions::gamble_settle(ctx)
+    // }
 
     pub fn recycle_cards_commit(
         ctx: Context<RecycleCardsCommit>,

@@ -47,118 +47,6 @@ pub struct CardsRecycled {
     pub total_recycled: u8,       // Total number of cards that were recycled
 }
 
-/// Helper functions for working with fixed-size arrays
-impl Player {
-    pub fn add_card(&mut self, card: Card) -> Result<()> {
-        require!(
-            (self.card_count as usize) < MAX_CARDS_PER_PLAYER as usize,
-            PonzimonError::MachineCapacityExceeded
-        );
-        self.cards[self.card_count as usize] = card;
-        self.card_count += 1;
-        Ok(())
-    }
-
-    pub fn is_card_being_recycled(&self, card_index: u8) -> bool {
-        if let PendingRandomAction::Recycle {
-            card_indices,
-            card_count,
-        } = &self.pending_action
-        {
-            for i in 0..*card_count {
-                if card_indices[i as usize] == card_index {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    pub fn remove_card(&mut self, index: u8) -> Result<()> {
-        let index_usize = index as usize;
-        require!(
-            index_usize < (self.card_count as usize),
-            PonzimonError::CardIndexOutOfBounds
-        );
-
-        // Shift all cards after the removed card to fill the gap
-        for i in index_usize..(self.card_count as usize - 1) {
-            self.cards[i] = self.cards[i + 1];
-        }
-
-        // Update bitset - shift down any staked cards that were after the removed card
-        let original_card_count = self.card_count;
-
-        // Clear the last slot (set to default/zero values)
-        self.cards[(self.card_count - 1) as usize] = Card::default();
-        self.card_count -= 1;
-
-        let mut new_bitset = 0u64;
-
-        for i in 0..original_card_count {
-            let old_mask = 1u64 << i;
-            if self.staked_cards_bitset & old_mask != 0 {
-                if i < index {
-                    // Cards before the removed card stay in the same position
-                    new_bitset |= old_mask;
-                } else if i > index {
-                    // Cards after the removed card shift down by 1
-                    new_bitset |= 1u64 << (i - 1);
-                }
-                // Cards at the removed index are automatically unstaked
-            }
-        }
-
-        self.staked_cards_bitset = new_bitset;
-
-        Ok(())
-    }
-
-    pub fn stake_card(&mut self, index: u8) -> Result<()> {
-        require!(index < 64, PonzimonError::CardIndexOutOfBounds);
-        let mask = 1u64 << index;
-        require!(
-            self.staked_cards_bitset & mask == 0,
-            PonzimonError::CardIsStaked
-        );
-        self.staked_cards_bitset |= mask;
-        Ok(())
-    }
-
-    pub fn unstake_card(&mut self, index: u8) -> Result<()> {
-        require!(index < 64, PonzimonError::CardIndexOutOfBounds);
-        let mask = 1u64 << index;
-        require!(
-            self.staked_cards_bitset & mask != 0,
-            PonzimonError::CardNotStaked
-        );
-        self.staked_cards_bitset &= !mask;
-        Ok(())
-    }
-
-    pub fn is_card_staked(&self, index: u8) -> bool {
-        if index >= 64 {
-            return false;
-        }
-        (self.staked_cards_bitset & (1u64 << index)) != 0
-    }
-
-    pub fn count_staked_cards(&self) -> u8 {
-        self.staked_cards_bitset.count_ones() as u8
-    }
-
-    pub fn calculate_total_berry_consumption(&self) -> u64 {
-        let mut total = 0u64;
-        for i in 0..self.card_count {
-            if self.is_card_staked(i) {
-                let card = &self.cards[i as usize];
-                total += card.berry_consumption as u64;
-            }
-        }
-        total
-    }
-}
-
 /// ────────────────────────────────────────────────────────────────────────────
 /// INTERNAL: update the global accumulator
 /// ────────────────────────────────────────────────────────────────────────────
@@ -462,7 +350,7 @@ pub struct PurchaseInitialFarm<'info> {
             + 10       // farm: Farm (1+1+8)
             + (MAX_CARDS_PER_PLAYER as usize * 6) // cards: [Card; MAX_CARDS_PER_PLAYER] - Card = 6 bytes (2+1+2+1)
             + 1        // card_count: u8
-            + 8        // staked_cards_bitset: u64
+            + 16       // staked_cards_bitset: u128 (Changed from 8 to 16)
             + 8        // berries: u64
             + 8        // total_hashpower: u64
             + 33       // referrer: Option<Pubkey> (1+32)
@@ -655,7 +543,10 @@ pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
     player.total_gamble_wins = 0;
     player.pending_action = PendingRandomAction::None;
     // verify randomness account data is valid
-    RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
+    #[cfg(not(feature = "test"))]
+    {
+        RandomnessAccountData::parse(ctx.accounts.randomness_account_data.data.borrow()).unwrap();
+    }
     player.randomness_account = ctx.accounts.randomness_account_data.key();
     player.commit_slot = 0;
 

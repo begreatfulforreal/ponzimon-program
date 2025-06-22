@@ -237,7 +237,7 @@ async function initializeProgram(
     const INITIAL_REWARD_RATE = new BN(initialRewardRateArg);
     const COOLDOWN_SLOTS = new BN(cooldownSlotsArg);
     const initialFarmPurchaseFeeLamports = new BN(0);
-    const boosterPackCostMicrotokens = new BN(0);
+    const boosterPackCostMicrotokens = new BN(10_000_000);
     const gambleFeeLamports = new BN(gambleFeeLamportsArg);
     const stakingLockupSlots = new BN(stakingLockupSlotsArg);
     const tokenRewardRate = new BN(tokenRewardRateArg);
