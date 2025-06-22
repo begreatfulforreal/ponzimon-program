@@ -28,15 +28,6 @@ pub fn validate_card_index(card_index: u8, cards_len: usize) -> Result<()> {
     Ok(())
 }
 
-/// Validates that a farm type is within acceptable bounds
-pub fn validate_farm_type(farm_type: u8) -> Result<()> {
-    require!(
-        farm_type <= MAX_FARM_TYPE,
-        PonzimonError::InvalidFarmTypeForOperation
-    );
-    Ok(())
-}
-
 /// Safely adds berry consumption to total, checking for overflow
 pub fn safe_add_berries(current: u64, to_add: u64) -> Result<u64> {
     current
@@ -84,6 +75,6 @@ pub fn get_next_rarity(current_rarity: u8) -> Option<u8> {
         VERY_RARE => Some(SUPER_RARE),
         SUPER_RARE => Some(MEGA_RARE),
         MEGA_RARE => Some(MEGA_RARE), // Already at max rarity
-        _ => None,         // Invalid rarity
+        _ => None,                    // Invalid rarity
     }
 }

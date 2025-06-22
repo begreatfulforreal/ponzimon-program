@@ -10,12 +10,6 @@ pub const ACC_SCALE: u128 = 1_000_000_000_000; // 1e12
 pub const MIN_RANDOMNESS_DELAY_SLOTS: u64 = 2; // Minimum slots between commit and settle
 pub const MAX_CARDS_PER_PLAYER: u8 = 128; // Maximum cards a player can have
 pub const MAX_STAKED_CARDS_PER_PLAYER: u8 = 25; // Maximum staked cards a player can have
-pub const MAX_FARM_TYPE: u8 = 8; // Maximum valid farm type
-
-// Fee constants - MOVED TO GLOBAL STATE FOR CONFIGURABILITY
-// pub const INITIAL_FARM_PURCHASE_FEE_LAMPORTS: u64 = 300_000_000; // 0.3 SOL in lamports
-// pub const BOOSTER_PACK_COST_MICROTOKENS: u64 = 100_000_000; // 10 tokens in microtokens
-// pub const GAMBLE_FEE_LAMPORTS: u64 = 100_000_000; // 0.1 SOL in lamports
 
 // Card Rarities (matching TypeScript CardRarity enum)
 pub const COMMON: u8 = 0;

@@ -100,7 +100,7 @@ async function mintToken(
     const connection = new anchor.web3.Connection(network);
     const provider = new anchor.AnchorProvider(
       connection,
-      new anchor.Wallet(wallet),
+      new anchor.Wallet(wallet as any),
       { commitment: "confirmed" }
     );
     anchor.setProvider(provider);
@@ -192,7 +192,7 @@ async function initializeProgram(
     const connection = new anchor.web3.Connection(network);
     const provider = new anchor.AnchorProvider(
       connection,
-      new anchor.Wallet(wallet),
+      new anchor.Wallet(wallet as any),
       { commitment: "confirmed" }
     );
     anchor.setProvider(provider);
@@ -236,7 +236,7 @@ async function initializeProgram(
     const TOTAL_SUPPLY = new BN(Number(totalSupplyArg) * 10 ** TOKEN_DECIMALS);
     const INITIAL_REWARD_RATE = new BN(initialRewardRateArg);
     const COOLDOWN_SLOTS = new BN(cooldownSlotsArg);
-    const initialFarmPurchaseFeeLamports = new BN(0);
+    const initialFarmPurchaseFeeLamports = new BN(300_000_000); // 0.3 SOL
     const boosterPackCostMicrotokens = new BN(10_000_000);
     const gambleFeeLamports = new BN(gambleFeeLamportsArg);
     const stakingLockupSlots = new BN(stakingLockupSlotsArg);
@@ -302,7 +302,7 @@ async function updateParameters(
     const connection = new anchor.web3.Connection(network);
     const provider = new anchor.AnchorProvider(
       connection,
-      new anchor.Wallet(wallet),
+      new anchor.Wallet(wallet as any),
       { commitment: "confirmed" }
     );
     anchor.setProvider(provider);
@@ -359,7 +359,7 @@ async function updatePoolManual(
     const connection = new anchor.web3.Connection(network);
     const provider = new anchor.AnchorProvider(
       connection,
-      new anchor.Wallet(wallet),
+      new anchor.Wallet(wallet as any),
       { commitment: "confirmed" }
     );
     anchor.setProvider(provider);
@@ -411,7 +411,7 @@ async function transferMintAuthority(
   const connection = new anchor.web3.Connection(network);
   const provider = new anchor.AnchorProvider(
     connection,
-    new anchor.Wallet(wallet),
+    new anchor.Wallet(wallet as any),
     { commitment: "confirmed" }
   );
   anchor.setProvider(provider);
@@ -445,7 +445,7 @@ async function transferMintAuthority(
     );
 
     const tx = new Transaction().add(ixMint).add(ixFreeze);
-    const sig = await connection.sendTransaction(tx, [wallet], {
+    const sig = await connection.sendTransaction(tx as any, [wallet], {
       skipPreflight: false,
       preflightCommitment: "confirmed",
     });
@@ -486,7 +486,7 @@ async function resetPlayer(
     const connection = new anchor.web3.Connection(network);
     const provider = new anchor.AnchorProvider(
       connection,
-      new anchor.Wallet(wallet),
+      new anchor.Wallet(wallet as any),
       { commitment: "confirmed" }
     );
     anchor.setProvider(provider);
@@ -761,7 +761,7 @@ program
     const connection = new anchor.web3.Connection(opts.network);
     const provider = new anchor.AnchorProvider(
       connection,
-      new anchor.Wallet(wallet),
+      new anchor.Wallet(wallet as any),
       { commitment: "confirmed" }
     );
     anchor.setProvider(provider);
@@ -849,7 +849,7 @@ program
     const connection = new anchor.web3.Connection(opts.network);
     const provider = new anchor.AnchorProvider(
       connection,
-      new anchor.Wallet(wallet),
+      new anchor.Wallet(wallet as any),
       { commitment: "confirmed" }
     );
     anchor.setProvider(provider);
@@ -881,7 +881,7 @@ program
 
     // Send transaction
     const tx = new Transaction().add(ixMint).add(ixFreeze);
-    const sig = await connection.sendTransaction(tx, [wallet], {
+    const sig = await connection.sendTransaction(tx as any, [wallet], {
       skipPreflight: false,
       preflightCommitment: "confirmed",
     });
@@ -913,7 +913,7 @@ program
     const connection = new anchor.web3.Connection(opts.network);
     const provider = new anchor.AnchorProvider(
       connection,
-      new anchor.Wallet(wallet),
+      new anchor.Wallet(wallet as any),
       { commitment: "confirmed" }
     );
     anchor.setProvider(provider);

@@ -838,8 +838,7 @@ pub struct UpgradeFarm<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        constraint = farm_type > player.farm.farm_type @ PonzimonError::InvalidFarmType,
-        constraint = farm_type <= MAX_FARM_TYPE @ PonzimonError::InvalidFarmType,
+        constraint = player.farm.farm_type + 1 == farm_type  && (farm_type as usize) < FARM_CONFIGS.len() -1 @ PonzimonError::InvalidFarmType,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
@@ -868,13 +867,6 @@ pub struct UpgradeFarm<'info> {
 }
 
 pub fn upgrade_farm(ctx: Context<UpgradeFarm>, farm_type: u8) -> Result<()> {
-    // Security: Validate farm type bounds
-    validate_farm_type(farm_type)?;
-    require!(
-        farm_type >= 2 && farm_type <= MAX_FARM_TYPE,
-        PonzimonError::InvalidFarmType
-    );
-
     let slot = Clock::get()?.slot;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
