@@ -167,5 +167,23 @@ describe("Ponzimon Basic Flow", () => {
       difference.lte(tolerance),
       `Final balance should be close to expected rewards. Got: ${finalBalance}, Expected: ${expectedRewards}`
     );
+    // --- Real-world Issuance Calculation ---
+    const slotsPerHour = 3600 / 0.4; // 9000
+    const mintDecimals = 6;
+
+    // Calculate issuance per hour for a single user
+    const tokensPerHourRaw = new BN(slotsPerHour).mul(
+      globalStateAccount.initialRewardRate
+    );
+    const tokensPerHour =
+      tokensPerHourRaw.toNumber() / Math.pow(10, mintDecimals);
+
+    // Calculate issuance in 6 hours
+    const tokensIn6Hours = tokensPerHour * 6;
+
+    console.log("--- Token Issuance Simulation (1 User) ---");
+    console.log(`Tokens issued per hour: ${tokensPerHour.toFixed(4)}`);
+    console.log(`Tokens issued in 6 hours: ${tokensIn6Hours.toFixed(4)}`);
+    console.log("-----------------------------------------");
   });
 });
