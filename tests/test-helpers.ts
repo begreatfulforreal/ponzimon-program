@@ -8,10 +8,7 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import {
-  TOKEN_PROGRAM_ID,
   createMint,
-  createAccount,
-  mintTo,
   getAssociatedTokenAddress,
   createSetAuthorityInstruction,
   AuthorityType,
@@ -39,7 +36,7 @@ export async function setupTestProgram() {
     authority,
     authority.publicKey,
     null,
-    9
+    6
   );
 
   const [globalStatePda] = await anchor.web3.PublicKey.findProgramAddress(
@@ -73,9 +70,9 @@ export async function setupTestProgram() {
   await program.methods
     .initializeProgram(
       new BN(0), // startSlot
-      new BN(100), // halvingInterval
-      new BN(1000000), // totalSupply
-      new BN(10), // initialRewardRate
+      new BN(216000), // halvingInterval
+      new BN("1000000000000000"), // totalSupply (1B with 6 decimals)
+      new BN(421627), // initialRewardRate
       null,
       null,
       null,
@@ -106,6 +103,25 @@ export async function setupTestProgram() {
     solRewardsWallet: solRewardsWalletPda,
     stakingVault: stakingVaultPda,
   };
+}
+
+export async function advanceSlots(
+  provider: anchor.AnchorProvider,
+  slots: number
+) {
+  const currentSlot = await provider.connection.getSlot();
+  const targetSlot = currentSlot + slots;
+  for (let i = 0; i < slots; i++) {
+    await provider.connection.requestAirdrop(
+      Keypair.generate().publicKey,
+      1 // A single lamport is enough to process a transaction
+    );
+  }
+  let newSlot = await provider.connection.getSlot();
+  while (newSlot < targetSlot) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    newSlot = await provider.connection.getSlot();
+  }
 }
 
 export async function airdrop(

@@ -6,7 +6,9 @@ import {
   airdrop,
   setupTestProgram,
   createTestTokenAccount,
+  advanceSlots,
 } from "./test-helpers";
+import { BN } from "@coral-xyz/anchor";
 
 describe("Ponzimon Basic Flow", () => {
   let program: Program<Ponzimon>;
@@ -85,24 +87,31 @@ describe("Ponzimon Basic Flow", () => {
       "Player should have 3 starter cards"
     );
 
-    const maxStakedCardsFirstFarm = 2;
     // --- Stake Starter Cards ---
-    for (let i = 0; i < maxStakedCardsFirstFarm; i++) {
-      await program.methods
-        .stakeCard(i)
-        .accounts({
-          playerWallet: playerWallet.publicKey,
-          tokenMint: mint,
-        })
-        .signers([playerWallet])
-        .rpc();
-    }
+    await program.methods
+      .stakeCard(0)
+      .accounts({
+        playerWallet: playerWallet.publicKey,
+        tokenMint: mint,
+      })
+      .signers([playerWallet])
+      .rpc();
 
     playerAccount = await program.account.player.fetch(playerPda);
+    // The player's `lastClaimSlot` is not updated on stake, so we need to get the
+    // `lastRewardSlot` from the global state to correctly calculate elapsed time for rewards.
+    const globalStateAfterStake = await program.account.globalState.fetch(
+      globalState
+    );
+    const startedSlot = globalStateAfterStake.lastRewardSlot;
+
+    const stakedCardCount = (
+      playerAccount.stakedCardsBitset.toString(2).match(/1/g) || []
+    ).length;
     assert.strictEqual(
-      playerAccount.stakedCardsBitset.bitLength(),
-      maxStakedCardsFirstFarm,
-      "All 2 starter cards should be staked"
+      stakedCardCount,
+      1,
+      "All 1 starter cards should be staked"
     );
     assert.ok(
       playerAccount.totalHashpower.gtn(0),
@@ -110,15 +119,16 @@ describe("Ponzimon Basic Flow", () => {
     );
 
     // --- Simulate Time and Claim Rewards ---
-    const initialBalance = (
-      await connection.getTokenAccountBalance(playerTokenAccount.address)
-    ).value.uiAmount;
-    assert.strictEqual(initialBalance, 0, "Player should start with 0 tokens");
+    const initialBalance = new BN(
+      (
+        await connection.getTokenAccountBalance(playerTokenAccount.address)
+      ).value.amount
+    );
+    assert.ok(initialBalance.eqn(0), "Player should start with 0 tokens");
 
-    // Simulate ~200 slots passing
-    for (let i = 0; i < 20; i++) {
-      await airdrop(provider, anchor.web3.Keypair.generate().publicKey, 0.0001);
-    }
+    // Simulate slots passing
+    const slotsToAdvance = 10;
+    await advanceSlots(provider, slotsToAdvance);
 
     await program.methods
       .claimRewards()
@@ -130,12 +140,32 @@ describe("Ponzimon Basic Flow", () => {
       .signers([playerWallet])
       .rpc();
 
-    const finalBalance = (
-      await connection.getTokenAccountBalance(playerTokenAccount.address)
-    ).value.uiAmount;
+    const finalBalance = new BN(
+      (
+        await connection.getTokenAccountBalance(playerTokenAccount.address)
+      ).value.amount
+    );
+
+    // --- Verification ---
+    const globalStateAccount = await program.account.globalState.fetch(
+      globalState
+    );
+    playerAccount = await program.account.player.fetch(playerPda);
+
+    const slotsAdvanced = playerAccount.lastClaimSlot.sub(startedSlot);
+    // Expected rewards should be based on the player's hashpower contribution
+    const expectedRewards = new BN(slotsAdvanced)
+      .mul(globalStateAccount.initialRewardRate)
+      .mul(playerAccount.totalHashpower)
+      .div(globalStateAccount.totalHashpower);
+
+    // Allow for a small tolerance in case of rounding differences
+    const tolerance = new BN(1);
+    const difference = finalBalance.sub(expectedRewards).abs();
+
     assert.ok(
-      finalBalance > 0,
-      "Player token balance should increase after claiming rewards"
+      difference.lte(tolerance),
+      `Final balance should be close to expected rewards. Got: ${finalBalance}, Expected: ${expectedRewards}`
     );
   });
 });
