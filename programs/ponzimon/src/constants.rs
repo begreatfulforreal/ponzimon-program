@@ -244,3 +244,7 @@ pub fn get_card_by_id(id: u16) -> Option<(u8, u16, u8)> {
         .find(|(card_id, _, _, _)| *card_id == id)
         .map(|(_, rarity, hashpower, berry_consumption)| (*rarity, *hashpower, *berry_consumption))
 }
+
+/* ─── DYNAMIC REWARDS ──────────────────────────────────────────────────────── */
+pub const REWARD_RATE_MULTIPLIER_SCALE: u64 = 1000;
+pub const REWARD_RATE_UPDATE_COOLDOWN_SLOTS: u64 = 9000; // Approx. 1 hour (9000 slots / 2.5 slots/sec)

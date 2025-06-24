@@ -88,16 +88,25 @@ fn update_pool(gs: &mut GlobalState, slot_now: u64) {
         return;
     }
 
+    // Apply the random multiplier to the base rate
+    let effective_rate_now = (rate_now as u128)
+        .saturating_mul(gs.reward_rate_multiplier as u128)
+        .saturating_div(REWARD_RATE_MULTIPLIER_SCALE as u128);
+
     let slots_elapsed = (slot_now - gs.last_reward_slot) as u128;
     let mut reward = slots_elapsed
-        .checked_mul(rate_now as u128)
+        .checked_mul(effective_rate_now as u128)
         .unwrap_or(u128::MAX);
     reward = reward.min(remaining_supply as u128); // clamp to cap
 
     gs.acc_tokens_per_hashpower += reward * ACC_SCALE / gs.total_hashpower as u128;
     gs.cumulative_rewards = gs.cumulative_rewards.saturating_add(reward as u64);
 
-    gs.current_reward_rate = if remaining_supply > 0 { rate_now } else { 0 };
+    gs.current_reward_rate = if remaining_supply > 0 {
+        effective_rate_now as u64
+    } else {
+        0
+    };
 
     gs.last_reward_slot = slot_now;
     gs.last_processed_halvings = halvings;
@@ -241,6 +250,7 @@ pub struct InitializeProgram<'info> {
         + 8 + 8                 /* total_global_gambles + total_global_gamble_wins */
         + 8 + 8 + 8             /* total_booster_packs_opened + total_card_recycling_attempts + total_successful_card_recycling */
         + 32 + 8 + 8 + 16 + 16 + 8 + 8 + 8 /* staking: sol_rewards_wallet + total_staked_tokens + staking_lockup_slots + acc_sol_rewards_per_token + acc_token_rewards_per_token + last_staking_reward_slot + token_reward_rate + total_sol_deposited */
+        + 8 + 8                 /* dynamic rewards: reward_rate_multiplier + last_rate_update_slot */
         + 64, /* padding for future expansion */
         seeds=[GLOBAL_STATE_SEED, token_mint.key().as_ref()],
         bump
@@ -345,6 +355,10 @@ pub fn initialize_program(
     gs.last_staking_reward_slot = start_slot;
     gs.token_reward_rate = token_reward_rate;
     gs.total_sol_deposited = 0;
+
+    // Dynamic rewards
+    gs.reward_rate_multiplier = REWARD_RATE_MULTIPLIER_SCALE;
+    gs.last_rate_update_slot = start_slot;
 
     Ok(())
 }
@@ -1617,6 +1631,31 @@ pub fn settle_open_booster(ctx: Context<SettleOpenBooster>) -> Result<()> {
     // Settle rewards before changing berry consumption
     update_pool(gs, clock.slot);
     player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
+
+    // --- Check if it's time to update the reward rate multiplier ---
+    if clock.slot
+        >= gs
+            .last_rate_update_slot
+            .saturating_add(REWARD_RATE_UPDATE_COOLDOWN_SLOTS)
+    {
+        // Use some bytes from the random value to determine the new multiplier.
+        // Let's use bytes 28-29 for this.
+        let mut multiplier_bytes: [u8; 2] = [0; 2];
+        multiplier_bytes.copy_from_slice(&random_value[28..30]);
+        let random_u16 = u16::from_le_bytes(multiplier_bytes);
+
+        // This creates a range from 500 to 1500, which is 0.5x to 1.5x
+        // The average is 1000 (or 1.0x), keeping your economy balanced.
+        let new_multiplier = 500 + (random_u16 as u64 % 1001);
+
+        gs.reward_rate_multiplier = new_multiplier;
+        gs.last_rate_update_slot = clock.slot;
+        msg!(
+            "Reward rate multiplier updated to {}/{}",
+            new_multiplier,
+            REWARD_RATE_MULTIPLIER_SCALE
+        );
+    }
 
     let mut card_ids = [0u16; 5];
     for i in 0..5 {

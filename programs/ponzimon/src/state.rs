@@ -56,6 +56,10 @@ pub struct GlobalState {
     pub token_reward_rate: u64,   // per slot
     pub total_sol_deposited: u64, // Track total SOL ever deposited for rewards
 
+    /* ── dynamic rewards ────────────────────────── */
+    pub reward_rate_multiplier: u64, // Scaled by 1000, e.g., 1000 = 1x, 100 = 0.1x, 10000 = 10x
+    pub last_rate_update_slot: u64,  // The slot when the multiplier was last updated
+
     /* ── future expansion ───────────────────────── */
     pub padding: [u8; 64], // Reserved space for future fields
 }
