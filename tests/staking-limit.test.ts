@@ -194,10 +194,14 @@ describe("Ponzimon Basic Flow", () => {
 
     // Calculate issuance in 6 hours
     const tokensIn6Hours = tokensPerHour * 6;
+    const tokensIn24Hours = tokensPerHour * 24;
+    const tokensInOneWeek = tokensPerHour * 24 * 7;
 
     console.log("--- Token Issuance Simulation (1 User) ---");
     console.log(`Tokens issued per hour: ${tokensPerHour.toFixed(4)}`);
     console.log(`Tokens issued in 6 hours: ${tokensIn6Hours.toFixed(4)}`);
+    console.log(`Tokens issued in 24 hours: ${tokensIn24Hours.toFixed(4)}`);
+    console.log(`Tokens issued in one week: ${tokensInOneWeek.toFixed(4)}`);
     console.log("-----------------------------------------");
   });
 });
