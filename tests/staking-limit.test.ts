@@ -167,6 +167,20 @@ describe("Ponzimon Basic Flow", () => {
       difference.lte(tolerance),
       `Final balance should be close to expected rewards. Got: ${finalBalance}, Expected: ${expectedRewards}`
     );
+
+    // --- In-Test Emission Log ---
+    const totalTestTimeSeconds = slotsAdvanced.toNumber() * 0.4;
+    const emittedTokens = finalBalance.toNumber() / Math.pow(10, 6);
+    console.log("\n--- In-Test Emissions ---");
+    console.log(
+      `Emitted ${emittedTokens.toFixed(
+        6
+      )} tokens over ${totalTestTimeSeconds.toFixed(
+        1
+      )} seconds (${slotsAdvanced.toNumber()} slots).`
+    );
+    console.log("-------------------------\n");
+
     // --- Real-world Issuance Calculation ---
     const slotsPerHour = 3600 / 0.4; // 9000
     const mintDecimals = 6;

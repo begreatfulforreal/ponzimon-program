@@ -51,6 +51,13 @@ pub struct CardsRecycled {
 /// INTERNAL: update the global accumulator
 /// ────────────────────────────────────────────────────────────────────────────
 fn update_pool(gs: &mut GlobalState, slot_now: u64) {
+    // Security: If the current slot is before the designated start slot,
+    // no rewards should be processed.
+    if slot_now < gs.start_slot {
+        gs.last_reward_slot = gs.start_slot;
+        return;
+    }
+
     if slot_now <= gs.last_reward_slot || gs.total_hashpower == 0 {
         gs.last_reward_slot = slot_now;
         return;
@@ -97,6 +104,13 @@ fn update_pool(gs: &mut GlobalState, slot_now: u64) {
 }
 
 fn update_staking_pool(gs: &mut GlobalState, slot_now: u64) {
+    // Security: If the current slot is before the designated start slot,
+    // no rewards should be processed.
+    if slot_now < gs.start_slot {
+        gs.last_staking_reward_slot = gs.start_slot;
+        return;
+    }
+
     if slot_now <= gs.last_staking_reward_slot {
         gs.last_staking_reward_slot = slot_now;
         return;
