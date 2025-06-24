@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-ponzimon = "PoZSUdi5nybcjX1bGo5nAZ2J7B6N89BvaTVDrHnKHJF"
+ponzimon = "PoZnVBrzZLRxedTVKUcFNfsXmFPoEvhZ29yDoNX6X9r"
 
 [registry]
 url = "https://api.apr.dev"

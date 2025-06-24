@@ -10,14 +10,11 @@ pub struct GlobalState {
     pub fees_wallet: Pubkey, // Wallet that receives SOL and token fees
 
     /* ── emission mechanics ─────────────────────── */
-    pub total_supply: u64,       // Hard cap (mint-burn accounting)
-    pub burned_tokens: u64,      // Total tokens destroyed with `token::burn`
-    pub cumulative_rewards: u64, // Total tokens ever minted as rewards
-    pub start_slot: u64,         // Genesis slot
-    pub halving_interval: u64,   // Slots between halvings
-    pub last_processed_halvings: u64,
-    pub initial_reward_rate: u64,       // Reward per slot at genesis
-    pub current_reward_rate: u64,       // Cached reward per slot "now"
+    pub total_supply: u64,              // Hard cap (mint-burn accounting)
+    pub burned_tokens: u64,             // Total tokens destroyed with `token::burn`
+    pub cumulative_rewards: u64,        // Total tokens ever minted as rewards
+    pub start_slot: u64,                // Genesis slot
+    pub reward_rate: u64,               // Reward per slot
     pub acc_tokens_per_hashpower: u128, // 1e12-scaled accumulator (renamed from acc_tokens_per_berry)
     pub last_reward_slot: u64,          // When `acc_tokens_per_hashpower` was last bumped
 

@@ -62,14 +62,7 @@ fn update_pool(gs: &mut GlobalState, slot_now: u64) {
         gs.last_reward_slot = slot_now;
         return;
     }
-    // Calculate theoretical halvings based on elapsed slots
-    let raw_halvings = calculate_halvings(slot_now, gs.start_slot, gs.halving_interval);
-
-    // Limit halvings to the maximum meaningful value
-    let max_halvings = calculate_max_halvings(gs.initial_reward_rate);
-    let halvings = raw_halvings.min(max_halvings);
-
-    let rate_now = reward_after_halvings(gs.initial_reward_rate, halvings);
+    let rate_now = gs.reward_rate;
 
     /* remaining supply after accounting for burns */
     let minted_minus_burn = gs.cumulative_rewards.saturating_sub(gs.burned_tokens);
@@ -83,7 +76,7 @@ fn update_pool(gs: &mut GlobalState, slot_now: u64) {
     // Check if we're close to depleting the supply
     if remaining_supply <= dust_threshold || rate_now == 0 {
         // Then set rate to zero to prevent future mining
-        gs.current_reward_rate = 0;
+        gs.reward_rate = 0;
         gs.last_reward_slot = slot_now;
         return;
     }
@@ -102,14 +95,7 @@ fn update_pool(gs: &mut GlobalState, slot_now: u64) {
     gs.acc_tokens_per_hashpower += reward * ACC_SCALE / gs.total_hashpower as u128;
     gs.cumulative_rewards = gs.cumulative_rewards.saturating_add(reward as u64);
 
-    gs.current_reward_rate = if remaining_supply > 0 {
-        effective_rate_now as u64
-    } else {
-        0
-    };
-
     gs.last_reward_slot = slot_now;
-    gs.last_processed_halvings = halvings;
 }
 
 fn update_staking_pool(gs: &mut GlobalState, slot_now: u64) {
@@ -242,8 +228,7 @@ pub struct InitializeProgram<'info> {
         + 32 + 32 + 32          /* authority + mint + fees_wallet */
         + 8  + 8                /* total_supply + burned_tokens */
         + 8  + 8                /* cumulative_rewards + start_slot */
-        + 8  + 8  + 8           /* halving_interval + last_halvings + initial_rate */
-        + 8  + 16 + 8           /* current_rate + acc_tokens_per_berry (u128!) + last_reward_slot */
+        + 8  + 16 + 8           /* reward_rate + acc_tokens_per_hashpower + last_reward_slot */
         + 1  + 1 + 1 + 8 + 8    /* burn_rate + referral_fee + prod + cooldown + dust_divisor */
         + 8 + 8 + 8             /* initial_farm_purchase_fee_lamports + booster_pack_cost_microtokens + gamble_fee_lamports */
         + 8 + 8                 /* total_berries + total_hashpower */
@@ -297,9 +282,8 @@ pub struct InitializeProgram<'info> {
 pub fn initialize_program(
     ctx: Context<InitializeProgram>,
     start_slot: u64,
-    halving_interval: u64,
     total_supply: u64,
-    initial_reward_rate: u64,
+    reward_rate: u64,
     cooldown_slots: Option<u64>,
     initial_farm_purchase_fee_lamports: Option<u64>,
     booster_pack_cost_microtokens: Option<u64>,
@@ -318,10 +302,7 @@ pub fn initialize_program(
     gs.cumulative_rewards = 0;
 
     gs.start_slot = start_slot;
-    gs.halving_interval = halving_interval;
-    gs.last_processed_halvings = 0;
-    gs.initial_reward_rate = initial_reward_rate;
-    gs.current_reward_rate = initial_reward_rate;
+    gs.reward_rate = reward_rate;
 
     gs.acc_tokens_per_hashpower = 0;
     gs.last_reward_slot = start_slot;
@@ -1757,14 +1738,13 @@ pub struct UpdateParameters<'info> {
 ///     - 0: ReferralFee (u8)
 ///     - 1: BurnRate (u8)
 ///     - 2: CooldownSlots (u64)
-///     - 3: HalvingInterval (u64)
-///     - 4: DustThresholdDivisor (u64)
-///     - 5: InitialFarmPurchaseFeeLamports (u64)
-///     - 6: BoosterPackCostMicrotokens (u64)
-///     - 7: GambleFeeLamports (u64)
-///     - 8: StakingLockupSlots (u64)
-///     - 9: TokenRewardRate (u64)
-///     - 10: InitialRewardRate (u64)
+///     - 3: DustThresholdDivisor (u64)
+///     - 4: InitialFarmPurchaseFeeLamports (u64)
+///     - 5: BoosterPackCostMicrotokens (u64)
+///     - 6: GambleFeeLamports (u64)
+///     - 7: StakingLockupSlots (u64)
+///     - 8: TokenRewardRate (u64)
+///     - 9: RewardRate (u64)
 /// * `parameter_value` - The new value for the parameter.
 pub fn update_parameter(
     ctx: Context<UpdateParameters>,
@@ -1790,11 +1770,6 @@ pub fn update_parameter(
             global_state.cooldown_slots = parameter_value;
         }
         3 => {
-            // HalvingInterval
-            require!(parameter_value > 0, PonzimonError::InvalidHalvingInterval);
-            global_state.halving_interval = parameter_value;
-        }
-        4 => {
             // DustThresholdDivisor
             require!(
                 parameter_value > 0,
@@ -1802,29 +1777,29 @@ pub fn update_parameter(
             );
             global_state.dust_threshold_divisor = parameter_value;
         }
-        5 => {
+        4 => {
             // InitialFarmPurchaseFeeLamports
             global_state.initial_farm_purchase_fee_lamports = parameter_value;
         }
-        6 => {
+        5 => {
             // BoosterPackCostMicrotokens
             global_state.booster_pack_cost_microtokens = parameter_value;
         }
-        7 => {
+        6 => {
             // GambleFeeLamports
             global_state.gamble_fee_lamports = parameter_value;
         }
-        8 => {
+        7 => {
             // StakingLockupSlots
             global_state.staking_lockup_slots = parameter_value;
         }
-        9 => {
+        8 => {
             // TokenRewardRate
             global_state.token_reward_rate = parameter_value;
         }
-        10 => {
-            // InitialRewardRate
-            global_state.initial_reward_rate = parameter_value;
+        9 => {
+            // RewardRate
+            global_state.reward_rate = parameter_value;
         }
         _ => return err!(PonzimonError::InvalidParameterIndex),
     }

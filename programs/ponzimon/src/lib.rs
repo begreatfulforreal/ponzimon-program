@@ -12,7 +12,7 @@ use std::str::FromStr;
 
 const ADMIN: &str = "8kvqgxQG77pv6RvEou8f2kHSWi3rtx8F7MksXUqNLGmn";
 
-declare_id!("PoZSUdi5nybcjX1bGo5nAZ2J7B6N89BvaTVDrHnKHJF");
+declare_id!("PoZnVBrzZLRxedTVKUcFNfsXmFPoEvhZ29yDoNX6X9r");
 
 #[program]
 pub mod ponzimon {
@@ -22,7 +22,6 @@ pub mod ponzimon {
     pub fn initialize_program(
         ctx: Context<InitializeProgram>,
         start_slot: u64,
-        halving_interval: u64,
         total_supply: u64,
         initial_reward_rate: u64,
         cooldown_slots: Option<u64>,
@@ -35,7 +34,6 @@ pub mod ponzimon {
         instructions::initialize_program(
             ctx,
             start_slot,
-            halving_interval,
             total_supply,
             initial_reward_rate,
             cooldown_slots,
