@@ -167,10 +167,8 @@ async function initializeProgram(
   keypairPath: string,
   mintPubkey: string,
   feesWalletAddress: string,
-  halvingIntervalArg: string,
   totalSupplyArg: string,
-  initialRewardRateArg: string,
-  cooldownSlotsArg: string,
+  rewardRateArg: string = "5555555",
   network: string,
   gambleFeeLamportsArg: string = "100000000",
   stakingLockupSlotsArg: string = "432000",
@@ -232,10 +230,9 @@ async function initializeProgram(
     );
 
     console.log("Initializing program...", totalSupplyArg);
-    const HALVING_INTERVAL = new BN(halvingIntervalArg);
     const TOTAL_SUPPLY = new BN(Number(totalSupplyArg) * 10 ** TOKEN_DECIMALS);
-    const INITIAL_REWARD_RATE = new BN(initialRewardRateArg);
-    const COOLDOWN_SLOTS = new BN(cooldownSlotsArg);
+    const REWARD_RATE = new BN(rewardRateArg);
+    const COOLDOWN_SLOTS = new BN(0);
     const initialFarmPurchaseFeeLamports = new BN(300_000_000); // 0.3 SOL
     const boosterPackCostMicrotokens = new BN(10_000_000);
     const gambleFeeLamports = new BN(gambleFeeLamportsArg);
@@ -244,9 +241,8 @@ async function initializeProgram(
     const tx = await program.methods
       .initializeProgram(
         currentSlot,
-        HALVING_INTERVAL,
         TOTAL_SUPPLY,
-        INITIAL_REWARD_RATE,
+        REWARD_RATE,
         COOLDOWN_SLOTS,
         initialFarmPurchaseFeeLamports,
         boosterPackCostMicrotokens,
@@ -633,14 +629,13 @@ program
     "-f, --fees-wallet <address>",
     "Fees recipient wallet address"
   )
-  .requiredOption("-h, --halving-interval <number>", "Halving interval (slots)")
   .requiredOption(
     "-t, --total-supply <number>",
     "Total supply (integer, e.g. 21000000000000)"
   )
   .requiredOption(
-    "-i, --initial-reward-rate <number>",
-    "Initial reward rate (integer, e.g. 50000000)"
+    "-r, --reward-rate <number>",
+    "Reward rate (integer, e.g. 50000000)"
   )
   .requiredOption("-c, --cooldown-slots <number>", "Cooldown slots", "0")
   .option(
@@ -653,10 +648,8 @@ program
       opts.keypair,
       opts.mint,
       opts.feesWallet,
-      opts.halvingInterval,
       opts.totalSupply,
-      opts.initialRewardRate,
-      opts.cooldownSlots,
+      opts.rewardRate,
       opts.network
     );
   });
@@ -664,7 +657,7 @@ program
 program
   .command("update-parameter")
   .description(
-    "Update a single program parameter by index. Indices: 0: ReferralFee, 1: BurnRate, 2: CooldownSlots, etc."
+    "Update a single program parameter by index. Indices: 0:ReferralFee, 1:BurnRate, 2:CooldownSlots, 3:DustThresholdDivisor, 4:InitialFarmPurchaseFeeLamports, 5:BoosterPackCostMicrotokens, 6:GambleFeeLamports, 7:StakingLockupSlots, 8:TokenRewardRate, 9:RewardRate"
   )
   .requiredOption("-k, --keypair <path>", "Path to keypair file")
   .requiredOption("-m, --mint <address>", "Token mint address")

@@ -155,7 +155,7 @@ describe("Ponzimon Basic Flow", () => {
     const slotsAdvanced = playerAccount.lastClaimSlot.sub(startedSlot);
     // Expected rewards should be based on the player's hashpower contribution
     const expectedRewards = new BN(slotsAdvanced)
-      .mul(globalStateAccount.initialRewardRate)
+      .mul(globalStateAccount.rewardRate)
       .mul(playerAccount.totalHashpower)
       .div(globalStateAccount.totalHashpower);
 
@@ -187,7 +187,7 @@ describe("Ponzimon Basic Flow", () => {
 
     // Calculate issuance per hour for a single user
     const tokensPerHourRaw = new BN(slotsPerHour).mul(
-      globalStateAccount.initialRewardRate
+      globalStateAccount.rewardRate
     );
     const tokensPerHour =
       tokensPerHourRaw.toNumber() / Math.pow(10, mintDecimals);
@@ -203,5 +203,88 @@ describe("Ponzimon Basic Flow", () => {
     console.log(`Tokens issued in 24 hours: ${tokensIn24Hours.toFixed(4)}`);
     console.log(`Tokens issued in one week: ${tokensInOneWeek.toFixed(4)}`);
     console.log("-----------------------------------------");
+  });
+});
+
+describe("Ponzimon Card Recycling", () => {
+  let program: Program<Ponzimon>;
+  let provider: anchor.AnchorProvider;
+  let connection: anchor.web3.Connection;
+  let mint: anchor.web3.PublicKey;
+  let authority: anchor.web3.Keypair;
+  let globalState: anchor.web3.PublicKey;
+  let feesWallet: anchor.web3.PublicKey;
+  let solRewardsWallet: anchor.web3.PublicKey;
+  let stakingVault: anchor.web3.PublicKey;
+  let feesTokenAccount: anchor.web3.PublicKey;
+
+  beforeAll(async () => {
+    // --- Program Setup ---
+    const setup = await setupTestProgram();
+    program = setup.program;
+    provider = setup.provider;
+    connection = setup.connection;
+    mint = setup.mint;
+    authority = setup.authority as any;
+    globalState = setup.globalState;
+    feesWallet = setup.feesWallet;
+    solRewardsWallet = setup.solRewardsWallet;
+    stakingVault = setup.stakingVault;
+
+    // --- Create Associated Token Accounts ---
+    const feesAta = await createTestTokenAccount(
+      provider,
+      mint,
+      feesWallet,
+      true
+    );
+    feesTokenAccount = feesAta.address;
+  });
+
+  it("calculates transaction size for recycling 128 cards", async () => {
+    const playerWallet = anchor.web3.Keypair.generate();
+    const cardIndices = Buffer.from(Array.from({ length: 128 }, (_, i) => i));
+
+    const [playerPda] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("player"),
+        playerWallet.publicKey.toBuffer(),
+        mint.toBuffer(),
+      ],
+      program.programId
+    );
+
+    const instruction = await program.methods
+      .recycleCardsCommit(cardIndices)
+      .accounts({
+        playerWallet: playerWallet.publicKey,
+        player: playerPda,
+        globalState: globalState,
+        tokenMint: mint,
+        randomnessAccountData: anchor.web3.Keypair.generate().publicKey,
+      } as any)
+      .instruction();
+
+    const transaction = new anchor.web3.Transaction().add(instruction);
+    transaction.feePayer = playerWallet.publicKey;
+    transaction.recentBlockhash = (
+      await connection.getLatestBlockhash()
+    ).blockhash;
+
+    const serializedTx = transaction.serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    });
+    const txSize = serializedTx.length;
+
+    console.log(`\n--- Transaction Size Calculation ---`);
+    console.log(`Transaction size for recycling 128 cards: ${txSize} bytes`);
+    console.log(`------------------------------------\n`);
+
+    // Solana transactions have a max size of 1232 bytes.
+    assert.ok(
+      txSize <= 1232,
+      `Transaction size (${txSize}) exceeds the maximum of 1232 bytes.`
+    );
   });
 });

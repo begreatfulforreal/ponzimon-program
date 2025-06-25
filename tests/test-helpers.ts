@@ -70,7 +70,6 @@ export async function setupTestProgram() {
   await program.methods
     .initializeProgram(
       new BN(0), // startSlot
-      new BN(1512000), // halvingInterval
       new BN("1000000000000000"), // totalSupply (1B with 6 decimals)
       new BN(352733915), // initialRewardRate
       null,

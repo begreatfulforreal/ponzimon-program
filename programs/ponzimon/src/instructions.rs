@@ -42,9 +42,8 @@ pub struct BoosterOpened {
 #[event]
 pub struct CardsRecycled {
     pub player: Pubkey,
-    pub recycled_cards: [u8; 20], // Card indices that were recycled
-    pub successful_upgrades: u8,  // Number of cards that were successfully upgraded
-    pub total_recycled: u8,       // Total number of cards that were recycled
+    pub successful_upgrades: u8, // Number of cards that were successfully upgraded
+    pub total_recycled: u8,      // Total number of cards that were recycled
 }
 
 /// ────────────────────────────────────────────────────────────────────────────
@@ -370,7 +369,7 @@ pub struct PurchaseInitialFarm<'info> {
             + 8        // total_gambles: u64
             + 8        // total_gamble_wins: u64
             // --- Consolidated randomness fields ---
-            + 22       // pending_action: PendingRandomAction enum (1 byte disc + 21 for largest Recycle variant)
+            + 130      // pending_action: PendingRandomAction enum (1 byte disc + 129 for largest Recycle variant)
             + 32       // randomness_account: Pubkey
             + 8        // commit_slot: u64
             // --- Additional player stats ---
@@ -2139,7 +2138,7 @@ pub fn recycle_cards_commit(ctx: Context<RecycleCardsCommit>, card_indices: Vec<
     // Guards
     require!(gs.production_enabled, PonzimonError::ProductionDisabled);
     require!(
-        !card_indices.is_empty() && card_indices.len() <= 20,
+        !card_indices.is_empty() && card_indices.len() <= 128,
         PonzimonError::InvalidRecycleCardCount
     );
     require!(
@@ -2173,7 +2172,7 @@ pub fn recycle_cards_commit(ctx: Context<RecycleCardsCommit>, card_indices: Vec<
     }
 
     // Create array from vector (pad with 0s if needed)
-    let mut card_indices_array = [0u8; 20];
+    let mut card_indices_array = [0u8; 128];
     for (i, &index) in card_indices.iter().enumerate() {
         card_indices_array[i] = index;
     }
@@ -2344,7 +2343,6 @@ pub fn recycle_cards_settle(ctx: Context<RecycleCardsSettle>) -> Result<()> {
 
     emit!(CardsRecycled {
         player: player.key(),
-        recycled_cards: card_indices_array,
         successful_upgrades,
         total_recycled: card_count,
     });
