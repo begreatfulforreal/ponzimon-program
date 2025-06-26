@@ -391,6 +391,18 @@ pub fn initialize_program(
         token::spl_token::instruction::AuthorityType::MintTokens,
         None,
     )?;
+    token::set_authority(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            token::SetAuthority {
+                current_authority: gs.to_account_info(),
+                account_or_mint: ctx.accounts.token_mint.to_account_info(),
+            },
+            signer,
+        ),
+        token::spl_token::instruction::AuthorityType::FreezeAccount,
+        None,
+    )?;
 
     Ok(())
 }
