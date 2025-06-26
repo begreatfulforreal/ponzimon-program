@@ -58,7 +58,8 @@ pub struct GlobalState {
     pub last_rate_update_slot: u64,  // The slot when the multiplier was last updated
 
     /* ── future expansion ───────────────────────── */
-    pub padding: [u8; 64], // Reserved space for future fields
+    pub rewards_vault: Pubkey,
+    pub padding: [u8; 32], // Reserved space for future fields
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]

@@ -39,7 +39,7 @@ import { base58 } from "@metaplex-foundation/umi/serializers";
 
 const GLOBAL_STATE_SEED = "global_state";
 const GOVERNANCE_TOKEN_SEED = "governance_token";
-const STAKING_VAULT_SEED = "staking_vault";
+const REWARDS_VAULT_SEED = "rewards_vault";
 const SOL_REWARDS_WALLET_SEED = "sol_rewards_wallet";
 
 // Add metadata configuration
@@ -224,8 +224,8 @@ async function initializeProgram(
       [Buffer.from(SOL_REWARDS_WALLET_SEED), tokenMint.toBuffer()],
       program.programId
     );
-    const [stakingVault] = PublicKey.findProgramAddressSync(
-      [Buffer.from(STAKING_VAULT_SEED), tokenMint.toBuffer()],
+    const [rewardsVault] = PublicKey.findProgramAddressSync(
+      [Buffer.from(REWARDS_VAULT_SEED), tokenMint.toBuffer()],
       program.programId
     );
 
@@ -256,7 +256,7 @@ async function initializeProgram(
         feesWallet: feesWallet,
         solRewardsWallet: solRewardsWallet,
         feesTokenAccount: feesTokenAccount,
-        stakingVault: stakingVault,
+        rewardsVault: rewardsVault,
         tokenMint: tokenMint,
         tokenProgram: TOKEN_PROGRAM_ID,
         associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,

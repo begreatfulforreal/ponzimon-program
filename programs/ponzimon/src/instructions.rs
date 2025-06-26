@@ -142,6 +142,7 @@ fn settle_and_mint_rewards<'info>(
     now: u64,
     player_token_account: &AccountInfo<'info>,
     token_mint: &AccountInfo<'info>,
+    rewards_vault: &AccountInfo<'info>,
     token_program: &AccountInfo<'info>,
     global_state_bump: u8,
 ) -> Result<u64> {
@@ -196,11 +197,11 @@ fn settle_and_mint_rewards<'info>(
     let signer = &[&seeds[..]];
 
     // mint to player - they get their full rewards
-    token::mint_to(
+    token::transfer(
         CpiContext::new_with_signer(
             token_program.clone(),
-            MintTo {
-                mint: token_mint.clone(),
+            Transfer {
+                from: rewards_vault.clone(),
                 to: player_token_account.clone(),
                 authority: gs.to_account_info(),
             },
@@ -264,11 +265,12 @@ pub struct InitializeProgram<'info> {
         payer = authority,
         token::mint = token_mint,
         token::authority = global_state,
-        seeds = [STAKING_VAULT_SEED, token_mint.key().as_ref()],
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
         bump
     )]
-    pub staking_vault: Account<'info, TokenAccount>,
+    pub rewards_vault: Account<'info, TokenAccount>,
     #[account(
+        mut,
         constraint = token_mint.mint_authority.unwrap() == global_state.key() @ PonzimonError::InvalidMintAuthority
     )]
     pub token_mint: Account<'info, Mint>,
@@ -295,6 +297,7 @@ pub fn initialize_program(
     gs.authority = ctx.accounts.authority.key();
     gs.token_mint = ctx.accounts.token_mint.key();
     gs.fees_wallet = ctx.accounts.fees_wallet.key();
+    gs.rewards_vault = ctx.accounts.rewards_vault.key();
 
     gs.total_supply = total_supply;
     gs.burned_tokens = 0;
@@ -339,6 +342,55 @@ pub fn initialize_program(
     // Dynamic rewards
     gs.reward_rate_multiplier = REWARD_RATE_MULTIPLIER_SCALE;
     gs.last_rate_update_slot = start_slot;
+
+    // Mint initial supply to rewards vault
+    let preminted_supply = ctx.accounts.token_mint.supply;
+    let amount_to_mint = total_supply.saturating_sub(preminted_supply);
+
+    if amount_to_mint > 0 {
+        let token_mint_key = ctx.accounts.token_mint.key();
+        let seeds = &[
+            GLOBAL_STATE_SEED,
+            token_mint_key.as_ref(),
+            &[ctx.bumps.global_state],
+        ];
+        let signer = &[&seeds[..]];
+
+        token::mint_to(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                MintTo {
+                    mint: ctx.accounts.token_mint.to_account_info(),
+                    to: ctx.accounts.rewards_vault.to_account_info(),
+                    authority: gs.to_account_info(),
+                },
+                signer,
+            ),
+            amount_to_mint,
+        )?;
+    }
+
+    // Set new mint authority to none
+    let token_mint_key = ctx.accounts.token_mint.key();
+    let seeds = &[
+        GLOBAL_STATE_SEED,
+        token_mint_key.as_ref(),
+        &[ctx.bumps.global_state],
+    ];
+    let signer = &[&seeds[..]];
+
+    token::set_authority(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            token::SetAuthority {
+                current_authority: gs.to_account_info(),
+                account_or_mint: ctx.accounts.token_mint.to_account_info(),
+            },
+            signer,
+        ),
+        token::spl_token::instruction::AuthorityType::MintTokens,
+        None,
+    )?;
 
     Ok(())
 }
@@ -391,6 +443,7 @@ pub struct PurchaseInitialFarm<'info> {
         bump,
     )]
     pub global_state: Account<'info, GlobalState>,
+
     /// CHECK: This is the fees recipient wallet from global_state
     #[account(
         mut,
@@ -514,10 +567,11 @@ pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
 
     // player bootstrap
     player.owner = ctx.accounts.player_wallet.key();
+    let (total_cards, berry_capacity, _) = FARM_CONFIGS[1];
     player.farm = Farm {
-        farm_type: 1,       // Level 1 farm from farmList
-        total_cards: 2,     // From farmList[1].slotQuantity
-        berry_capacity: 15, // From farmList[1].berryAvailable
+        farm_type: 1,
+        total_cards,
+        berry_capacity,
     };
 
     // Initialize arrays
@@ -615,6 +669,12 @@ pub struct DiscardCard<'info> {
     pub global_state: Account<'info, GlobalState>,
     #[account(
         mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
+    #[account(
+        mut,
         constraint = player_token_account.mint == global_state.token_mint,
         constraint = player_token_account.owner == player_wallet.key() @ PonzimonError::InvalidTokenAccountOwner
     )]
@@ -658,6 +718,7 @@ pub fn discard_card(ctx: Context<DiscardCard>, card_index: u8) -> Result<()> {
         slot,
         &ctx.accounts.player_token_account.to_account_info(),
         &ctx.accounts.token_mint.to_account_info(),
+        &ctx.accounts.rewards_vault.to_account_info(),
         &ctx.accounts.token_program.to_account_info(),
         ctx.bumps.global_state,
     )?;
@@ -697,9 +758,22 @@ pub struct StakeCard<'info> {
     )]
     pub global_state: Account<'info, GlobalState>,
     #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
+    #[account(
         constraint = token_mint.key() == global_state.token_mint @ PonzimonError::InvalidTokenMint
     )]
     pub token_mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        constraint = player_token_account.mint == global_state.token_mint,
+        constraint = player_token_account.owner == player_wallet.key() @ PonzimonError::InvalidTokenAccountOwner
+    )]
+    pub player_token_account: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
 }
 
 pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
@@ -708,8 +782,16 @@ pub fn stake_card(ctx: Context<StakeCard>, card_index: u8) -> Result<()> {
     let gs = &mut ctx.accounts.global_state;
 
     // Settle rewards before making changes
-    update_pool(gs, slot);
-    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
+    settle_and_mint_rewards(
+        player,
+        gs,
+        slot,
+        &ctx.accounts.player_token_account.to_account_info(),
+        &ctx.accounts.token_mint.to_account_info(),
+        &ctx.accounts.rewards_vault.to_account_info(),
+        &ctx.accounts.token_program.to_account_info(),
+        ctx.bumps.global_state,
+    )?;
 
     // Security: Validate card index bounds
     validate_card_index(card_index, player.card_count as usize)?;
@@ -782,9 +864,22 @@ pub struct UnstakeCard<'info> {
     )]
     pub global_state: Account<'info, GlobalState>,
     #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
+    #[account(
         constraint = token_mint.key() == global_state.token_mint @ PonzimonError::InvalidTokenMint
     )]
     pub token_mint: Account<'info, Mint>,
+    #[account(
+        mut,
+        constraint = player_token_account.mint == global_state.token_mint,
+        constraint = player_token_account.owner == player_wallet.key() @ PonzimonError::InvalidTokenAccountOwner
+    )]
+    pub player_token_account: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
 }
 
 pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
@@ -793,8 +888,16 @@ pub fn unstake_card(ctx: Context<UnstakeCard>, card_index: u8) -> Result<()> {
     let gs = &mut ctx.accounts.global_state;
 
     // Settle rewards before making changes
-    update_pool(gs, slot);
-    player.last_acc_tokens_per_hashpower = gs.acc_tokens_per_hashpower;
+    settle_and_mint_rewards(
+        player,
+        gs,
+        slot,
+        &ctx.accounts.player_token_account.to_account_info(),
+        &ctx.accounts.token_mint.to_account_info(),
+        &ctx.accounts.rewards_vault.to_account_info(),
+        &ctx.accounts.token_program.to_account_info(),
+        ctx.bumps.global_state,
+    )?;
 
     // Security: Validate card index bounds
     validate_card_index(card_index, player.card_count as usize)?;
@@ -846,7 +949,7 @@ pub struct UpgradeFarm<'info> {
     #[account(
         mut,
         constraint = player.owner == player_wallet.key() @ PonzimonError::Unauthorized,
-        constraint = player.farm.farm_type + 1 == farm_type  && (farm_type as usize) < FARM_CONFIGS.len() -1 @ PonzimonError::InvalidFarmType,
+        constraint = player.farm.farm_type + 1 == farm_type  && (farm_type as usize) <= FARM_CONFIGS.len() -1 @ PonzimonError::InvalidFarmType,
         seeds = [PLAYER_SEED, player_wallet.key().as_ref(), token_mint.key().as_ref()],
         bump
     )]
@@ -857,6 +960,12 @@ pub struct UpgradeFarm<'info> {
         bump,
     )]
     pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
     #[account(
         mut,
         constraint = player_token_account.mint == global_state.token_mint,
@@ -893,6 +1002,7 @@ pub fn upgrade_farm(ctx: Context<UpgradeFarm>, farm_type: u8) -> Result<()> {
         slot,
         &ctx.accounts.player_token_account.to_account_info(),
         &ctx.accounts.token_mint.to_account_info(),
+        &ctx.accounts.rewards_vault.to_account_info(),
         &ctx.accounts.token_program.to_account_info(),
         ctx.bumps.global_state,
     )?;
@@ -976,6 +1086,12 @@ pub struct ClaimRewards<'info> {
     pub global_state: Account<'info, GlobalState>,
     #[account(
         mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
+    #[account(
+        mut,
         constraint = player_token_account.owner == player_wallet.key(),
         constraint = player_token_account.mint == global_state.token_mint
     )]
@@ -994,6 +1110,7 @@ pub fn claim_rewards(ctx: Context<ClaimRewards>) -> Result<()> {
         now,
         &ctx.accounts.player_token_account.to_account_info(),
         &ctx.accounts.token_mint.to_account_info(),
+        &ctx.accounts.rewards_vault.to_account_info(),
         &ctx.accounts.token_program.to_account_info(),
         ctx.bumps.global_state,
     )?;
@@ -1021,6 +1138,12 @@ pub struct RequestOpenBooster<'info> {
         bump,
     )]
     pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
     #[account(
         mut,
         constraint = player_token_account.mint == global_state.token_mint,
@@ -1062,6 +1185,7 @@ pub fn request_open_booster(ctx: Context<RequestOpenBooster>) -> Result<()> {
         slot,
         &ctx.accounts.player_token_account.to_account_info(),
         &ctx.accounts.token_mint.to_account_info(),
+        &ctx.accounts.rewards_vault.to_account_info(),
         &ctx.accounts.token_program.to_account_info(),
         ctx.bumps.global_state,
     )?;
@@ -1195,6 +1319,12 @@ pub struct SettleOpenBooster<'info> {
         bump,
     )]
     pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
     pub token_mint: Account<'info, Mint>,
     /// CHECK: The account's data is validated manually within the handler.
     pub randomness_account_data: AccountInfo<'info>,
@@ -1478,10 +1608,11 @@ pub fn reset_player(ctx: Context<ResetPlayer>) -> Result<()> {
     // Reset player's berry consumption, power, and farm
     player.berries = 0;
     player.total_hashpower = 0;
+    let (total_cards, berry_capacity, _) = FARM_CONFIGS[0];
     player.farm = Farm {
-        farm_type: 1,
-        total_cards: 2,
-        berry_capacity: 15,
+        farm_type: 0,
+        total_cards,
+        berry_capacity,
     };
     player.cards = [Card::default(); MAX_CARDS_PER_PLAYER as usize]; // Clear all cards
     player.card_count = 0;
@@ -1523,6 +1654,12 @@ pub struct RecycleCardsCommit<'info> {
         bump,
     )]
     pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
     pub token_mint: Account<'info, Mint>,
     /// CHECK: The account's data is validated manually within the handler.
     pub randomness_account_data: AccountInfo<'info>,
@@ -1606,6 +1743,12 @@ pub struct RecycleCardsSettle<'info> {
         bump,
     )]
     pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
     pub token_mint: Account<'info, Mint>,
     /// CHECK: The account's data is validated manually within the handler.
     pub randomness_account_data: AccountInfo<'info>,
@@ -1825,6 +1968,12 @@ pub struct CancelPendingAction<'info> {
         bump,
     )]
     pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
     pub token_mint: Account<'info, Mint>,
 }
 
@@ -1889,6 +2038,7 @@ pub struct StakeTokens<'info> {
         bump,
     )]
     pub global_state: Account<'info, GlobalState>,
+
     #[account(
         mut,
         constraint = player_token_account.owner == player_wallet.key(),
@@ -1897,10 +2047,10 @@ pub struct StakeTokens<'info> {
     pub player_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        seeds = [STAKING_VAULT_SEED, token_mint.key().as_ref()],
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
         bump,
     )]
-    pub staking_vault: Box<Account<'info, TokenAccount>>,
+    pub rewards_vault: Box<Account<'info, TokenAccount>>,
     /// CHECK: This is a PDA for holding SOL rewards
     #[account(
         mut,
@@ -1977,7 +2127,7 @@ pub fn stake_tokens(ctx: Context<StakeTokens>, amount: u64) -> Result<()> {
             ctx.accounts.token_program.to_account_info(),
             Transfer {
                 from: ctx.accounts.player_token_account.to_account_info(),
-                to: ctx.accounts.staking_vault.to_account_info(),
+                to: ctx.accounts.rewards_vault.to_account_info(),
                 authority: ctx.accounts.player_wallet.to_account_info(),
             },
         ),
@@ -2019,10 +2169,10 @@ pub struct UnstakeTokens<'info> {
     pub player_token_account: Box<Account<'info, TokenAccount>>,
     #[account(
         mut,
-        seeds = [STAKING_VAULT_SEED, token_mint.key().as_ref()],
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
         bump,
     )]
-    pub staking_vault: Box<Account<'info, TokenAccount>>,
+    pub rewards_vault: Box<Account<'info, TokenAccount>>,
     /// CHECK: This is a PDA for holding SOL rewards
     #[account(
         mut,
@@ -2113,7 +2263,7 @@ pub fn unstake_tokens(ctx: Context<UnstakeTokens>, amount: u64) -> Result<()> {
         CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             Transfer {
-                from: ctx.accounts.staking_vault.to_account_info(),
+                from: ctx.accounts.rewards_vault.to_account_info(),
                 to: ctx.accounts.player_token_account.to_account_info(),
                 authority: gs.to_account_info(),
             },
@@ -2148,6 +2298,18 @@ pub struct ClaimStakingRewards<'info> {
         bump
     )]
     pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        constraint = player_token_account.owner == player_wallet.key(),
+        constraint = player_token_account.mint == global_state.token_mint
+    )]
+    pub player_token_account: Box<Account<'info, TokenAccount>>,
     /// CHECK: This is a PDA for holding SOL rewards
     #[account(
         mut,
@@ -2155,13 +2317,6 @@ pub struct ClaimStakingRewards<'info> {
         bump,
     )]
     pub sol_rewards_wallet: AccountInfo<'info>,
-
-    #[account(
-        mut,
-        constraint = player_token_account.owner == player_wallet.key(),
-        constraint = player_token_account.mint == global_state.token_mint
-    )]
-    pub player_token_account: Box<Account<'info, TokenAccount>>,
     #[account(mut)]
     pub token_mint: Account<'info, Mint>,
     pub token_program: Program<'info, Token>,
@@ -2233,11 +2388,11 @@ pub fn claim_staking_rewards(ctx: Context<ClaimStakingRewards>) -> Result<()> {
 
     // Mint token rewards (emissions)
     if tokens_to_claim > 0 {
-        token::mint_to(
+        token::transfer(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
-                MintTo {
-                    mint: ctx.accounts.token_mint.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.rewards_vault.to_account_info(),
                     to: ctx.accounts.player_token_account.to_account_info(),
                     authority: gs.to_account_info(),
                 },
@@ -2273,6 +2428,12 @@ pub struct GambleCommit<'info> {
         bump,
     )]
     pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
     #[account(
         mut,
         constraint = player_token_account.owner == player_wallet.key(),
@@ -2386,6 +2547,12 @@ pub struct GambleSettle<'info> {
         bump,
     )]
     pub global_state: Account<'info, GlobalState>,
+    #[account(
+        mut,
+        seeds = [REWARDS_VAULT_SEED, token_mint.key().as_ref()],
+        bump,
+    )]
+    pub rewards_vault: Account<'info, TokenAccount>,
     #[account(
         mut,
         constraint = player_token_account.owner == player_wallet.key(),
