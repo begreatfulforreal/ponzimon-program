@@ -15,6 +15,7 @@ no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
 test = []
+devnet = []
 
 [dependencies]
 anchor-lang = {version = "0.31.1", features = ["init-if-needed"]}

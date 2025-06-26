@@ -116,4 +116,6 @@ pub enum PonzimonError {
     NoPendingAction,
     #[msg("Cannot cancel yet. A timeout period is required.")]
     CancelTimeoutNotExpired,
+    #[msg("Invalid randomness account owner")]
+    InvalidRandomnessAccountOwner,
 }

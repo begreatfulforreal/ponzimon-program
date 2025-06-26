@@ -4,6 +4,13 @@ pub const STAKING_VAULT_SEED: &[u8] = b"staking_vault";
 pub const SOL_REWARDS_WALLET_SEED: &[u8] = b"sol_rewards_wallet";
 pub const REWARDS_VAULT_SEED: &[u8] = b"rewards_vault";
 
+// define switchboard program id
+// feature devnet is different from mainnet
+#[cfg(feature = "devnet")]
+pub const SWITCHBOARD_PROGRAM_ID: &str = "Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2";
+#[cfg(not(feature = "devnet"))]
+pub const SWITCHBOARD_PROGRAM_ID: &str = "SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv";
+
 // Fixed variables
 pub const ACC_SCALE: u128 = 1_000_000_000_000; // 1e12
 

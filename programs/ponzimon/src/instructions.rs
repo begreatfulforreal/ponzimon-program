@@ -3,7 +3,7 @@ use anchor_spl::{
     associated_token::AssociatedToken,
     token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer},
 };
-
+use std::str::FromStr;
 use crate::{constants::*, errors::PonzimonError, helpers::*, state::*};
 use switchboard_on_demand::accounts::RandomnessAccountData;
 
@@ -500,6 +500,14 @@ pub fn purchase_initial_farm(ctx: Context<PurchaseInitialFarm>) -> Result<()> {
     let slot = Clock::get()?.slot;
     let player = &mut ctx.accounts.player;
     let gs = &mut ctx.accounts.global_state;
+
+    // check owner of randomness_account_data is switchboard
+    // from string to pubkey
+    let switchboard_program_id = &Pubkey::from_str(SWITCHBOARD_PROGRAM_ID).unwrap();
+    require!(
+        ctx.accounts.randomness_account_data.owner == switchboard_program_id,
+        PonzimonError::InvalidRandomnessAccountOwner
+    );
 
     require!(gs.production_enabled, PonzimonError::ProductionDisabled);
     require!(
