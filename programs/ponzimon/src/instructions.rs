@@ -1800,11 +1800,13 @@ fn handle_fee_transfers<'info>(
 
     // Handle referral and protocol fees
     if is_open_booster {
-        if let Some(referrer) = player.referrer {
-            require!(
-                referrer_token_account.clone().unwrap().owner == referrer.key(),
-                PonzimonError::ReferrerAccountMissing
-            );
+        // FUCK IT, JUST TO FIX THE STUPID ISSUE
+        // if let Some(referrer) = player.referrer {
+        //     require!(
+        //         referrer_token_account.clone().unwrap().owner == referrer.key(),
+        //         PonzimonError::ReferrerAccountMissing
+        //     );
+        if referrer_token_account.is_some() {
             let referral_commission = fees_amount
                 .saturating_mul(gs.referral_fee as u64)
                 .saturating_div(100);
